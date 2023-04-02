@@ -1,7 +1,6 @@
 import json
-import pika
 import logging
-import colorlog
+import pika
 
 QUEUE_NAME = "transcoding_jobs"
 PROGRESS_QUEUE_NAME = "transcoding_progress"
@@ -13,12 +12,9 @@ job_data = {
     "transcode_options": "videoconvert ! x264enc",
 }
 
-# Set up logging
-handler = colorlog.StreamHandler()
-handler.setFormatter(colorlog.ColoredFormatter("%(log_color)s%(message)s"))
-log = colorlog.getLogger()
-log.addHandler(handler)
-log.setLevel(logging.INFO)
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+)
 
 credentials = pika.PlainCredentials("guest", "guest")
 parameters = pika.ConnectionParameters("localhost", 5672, "/", credentials)
@@ -33,7 +29,7 @@ channel.basic_publish(
     body=json.dumps(job_data),
 )
 
-log.info(f"Test job submitted: {job_data}")
+logging.info(f"Test job submitted: {job_data}")
 
 channel.queue_declare(queue=PROGRESS_QUEUE_NAME)
 
@@ -42,8 +38,8 @@ channel.queue_declare(queue=PROGRESS_QUEUE_NAME)
 
 
 def callback(ch, method, properties, body):
-    # Print the job progress percentage
-    log.info(f"Progress: {json.loads(body)['progress']:.2f}%")
+    # Log the job progress percentage
+    logging.info(f"Progress: {json.loads(body)['progress']:.2f}%")
 
 
 channel.basic_consume(
@@ -51,7 +47,7 @@ channel.basic_consume(
 )
 
 # Wait and let the callback run until we receive a keyboard interrupt
-log.info("Waiting for progress messages. Press CTRL+C to exit.")
+logging.info("Waiting for progress messages. Press CTRL+C to exit.")
 try:
     channel.start_consuming()
 except KeyboardInterrupt:
