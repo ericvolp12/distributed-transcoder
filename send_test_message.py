@@ -6,10 +6,13 @@ QUEUE_NAME = "transcoding_jobs"
 PROGRESS_QUEUE_NAME = "transcoding_progress"
 
 job_data = {
-    "job_id": "test_job_1",
-    "input_key": "test_chunk_in_1.mp4",
-    "output_key": "test_chunk_out_1.mp4",
-    "transcode_options": "videoconvert ! x264enc",
+    "job_id": "test_job_2",
+    "input_key": "test_chunk_2_in_1.mkv",
+    "output_key": "test_chunk_2_out_1.mp4",
+    "transcode_options": "filesrc location={{input_file}} ! matroskademux name=d \
+        mp4mux name=mux ! filesink location={{output_file}} \
+        d.video_0 ! queue ! decodebin ! videoscale ! video/x-raw,width=640,height=480 ! x265enc bitrate=1024 ! h265parse ! {{progress}} ! mux.video_0 \
+        d.audio_0 ! queue ! decodebin ! audioconvert ! voaacenc ! {{progress}} ! mux.audio_0",
 }
 
 logging.basicConfig(

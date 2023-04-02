@@ -108,6 +108,7 @@ def on_message(
         structure = message.get_structure()
         if structure and structure.get_name() == "progress":
             percent: float = structure.get_double("percent-double")[1]
+            logger.info(f"Progess Struct Received: {structure.to_string()}")
             logger.info("Progress: {:.1f}%".format(percent))
             progress_channel.basic_publish(
                 exchange="",
@@ -137,13 +138,26 @@ def transcode(
     :param job_id: The unique identifier for the transcoding job.
     :return: The path to the output file if successful, None otherwise.
     """
+    loop = GObject.MainLoop()
+    GObject.threads_init()
     Gst.init(None)
-    pipeline_str = f"filesrc location={input_file} ! decodebin ! {transcode_options} ! progressreport update-freq=10 ! filesink location={output_file}"
 
-    pipeline = Gst.parse_launch(pipeline_str)
+    pipeline_str = (
+        transcode_options.replace("{{output_file}}", output_file)
+        .replace("{{input_file}}", input_file)
+        .replace("{{progress}}", "progressreport update-freq=10")
+    )
+
+    logger.info(f"Starting transcoding with options: {pipeline_str}")
+
+    try:
+        pipeline = Gst.parse_launch(pipeline_str)
+    except GLib.Error as e:
+        logger.error(f"Unable to create pipeline: {e}")
+        return None
+
     bus = pipeline.get_bus()
     bus.add_signal_watch()
-    loop = GLib.MainLoop()
     bus.connect("message", on_message, (loop, pipeline, progress_channel, job_id))
 
     # Set the pipeline to the playing state
@@ -195,14 +209,17 @@ def process_message(
         )
 
         # Transcode the input chunk
-        logger.info(f"Starting transcoding with options: {transcode_options}")
-        transcode(
+        result = transcode(
             input_file.name,
             output_file.name,
             transcode_options,
             progress_channel,
             job_id,
         )
+        if result is None:
+            logger.error("Transcoding failed")
+            ch.basic_ack(delivery_tag=method.delivery_tag)
+            return
         logger.info("Transcoding completed")
 
         # Upload the output chunk
