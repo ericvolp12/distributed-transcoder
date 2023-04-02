@@ -1,14 +1,13 @@
 import json
+import logging
 import os
 import tempfile
 import time
-import logging
 from typing import Optional, Tuple
 
 import boto3
 import gi
 import pika
-from gi.repository import GObject, Gst
 
 gi.require_version("Gst", "1.0")
 from gi.repository import GLib, Gst
@@ -24,9 +23,12 @@ AWS_S3_ENDPOINT_URL = os.environ["AWS_S3_ENDPOINT_URL"]
 # Logging configuration
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s]: %(message)s",
+    format="%(asctime)s (%(name)s) [%(levelname)s]: %(message)s",
     handlers=[logging.StreamHandler()],
 )
+logging.getLogger("pika").setLevel(logging.CRITICAL)
+logging.getLogger("botocore").setLevel(logging.WARNING)
+logging.getLogger("gst").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 # Set up S3 client
@@ -63,7 +65,7 @@ def connect_rabbitmq(
             )
             return pika.BlockingConnection(connection_parameters)
         except pika.exceptions.AMQPConnectionError:
-            print(
+            logging.info(
                 f"Connection to RabbitMQ failed. Retrying in {retry_interval} seconds..."
             )
             retries += 1
@@ -137,14 +139,12 @@ def transcode(
     :param job_id: The unique identifier for the transcoding job.
     :return: The path to the output file if successful, None otherwise.
     """
-    loop = GObject.MainLoop()
-    GObject.threads_init()
-    Gst.init(None)
+    loop = GLib.MainLoop()
 
     pipeline_str = (
         transcode_options.replace("{{output_file}}", output_file)
         .replace("{{input_file}}", input_file)
-        .replace("{{progress}}", "progressreport update-freq=10")
+        .replace("{{progress}}", "progressreport update-freq=10 silent=true")
     )
 
     logger.info(f"Starting transcoding with options: {pipeline_str}")
@@ -238,7 +238,6 @@ def process_message(
 
 
 def main():
-    GObject.threads_init()
     Gst.init(None)
 
     # Connect to RabbitMQ and set up a channel
@@ -246,7 +245,14 @@ def main():
     rabbitmq_host = "rabbitmq"
     rabbitmq_port = 5672
 
-    connection = connect_rabbitmq(rabbitmq_host, rabbitmq_port, credentials)
+    try:
+        connection = connect_rabbitmq(rabbitmq_host, rabbitmq_port, credentials)
+    except Exception:
+        logger.error(
+            f"Unable to connect to RabbitMQ on {rabbitmq_host}:{rabbitmq_port}"
+        )
+        return
+
     channel = connection.channel()
     channel.queue_declare(queue=QUEUE_NAME)
 
