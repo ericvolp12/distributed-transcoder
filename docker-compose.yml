@@ -32,6 +32,7 @@ services:
       AWS_SECRET_ACCESS_KEY: minio123
       S3_BUCKET_NAME: transcode
       AWS_S3_ENDPOINT_URL: http://minio:9000
+      # GST_DEBUG: 2
     depends_on:
       - rabbitmq
       - minio

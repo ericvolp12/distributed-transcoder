@@ -108,7 +108,6 @@ def on_message(
         structure = message.get_structure()
         if structure and structure.get_name() == "progress":
             percent: float = structure.get_double("percent-double")[1]
-            logger.info(f"Progess Struct Received: {structure.to_string()}")
             logger.info("Progress: {:.1f}%".format(percent))
             progress_channel.basic_publish(
                 exchange="",
@@ -230,7 +229,9 @@ def process_message(
     ch.basic_publish(
         exchange="",
         routing_key="transcoding_results",
-        body=json.dumps({"status": "completed", "output_key": output_key}),
+        body=json.dumps(
+            {"status": "completed", "output_key": output_key, "job_id": job_id}
+        ),
     )
     ch.basic_ack(delivery_tag=method.delivery_tag)
     logger.info("Job completed and result message sent")
