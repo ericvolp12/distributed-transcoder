@@ -13,12 +13,12 @@ RESULTS_QUEUE_NAME = "transcoding_results"
 # Job data with input_key, output_key, and transcode options
 job_data = {
     "job_id": "test_job_2",
-    "input_key": "test_chunk_2_in_1.mkv",
-    "output_key": "test_chunk_2_out_1.mp4",
-    "transcode_options": "filesrc location={{input_file}} ! matroskademux name=d \
+    "input_key": "test_chunk_in_1.mp4",
+    "output_key": "test_chunk_out_1.mp4",
+    "transcode_options": "filesrc location={{input_file}} ! qtdemux name=d \
         mp4mux name=mux ! filesink location={{output_file}} \
-        d.audio_0 ! queue ! decodebin ! audioconvert ! voaacenc ! queue ! mux.audio_0 \
-        d.video_0 ! queue ! decodebin ! videoscale ! video/x-raw,width=640,height=480 ! x265enc bitrate=768 tune=zerolatency ! {{progress}} ! h265parse ! queue ! mux.video_0",
+        d.audio_0 ! queue max-size-buffers=0 max-size-bytes=0 max-size-time=0 ! decodebin ! audioconvert ! avenc_aac ! mux.audio_0 \
+        d.video_0 ! decodebin ! videoscale ! video/x-raw,width=640,height=480 ! x265enc bitrate=768 ! {{progress}} ! h265parse ! mux.video_0",
 }
 
 # Configure logging
