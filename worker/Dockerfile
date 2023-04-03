@@ -16,10 +16,18 @@ RUN apt-get update && apt-get install -y \
     python3-dev \
     gir1.2-gstreamer-1.0
 
-RUN pip install pygobject pika boto3
+RUN pip install --no-cache-dir poetry
 
 WORKDIR /app
 
-COPY worker.py /app/
+# Copy the pyproject.toml and poetry.lock files into the container
+COPY pyproject.toml poetry.lock ./
+
+# Install dependencies using Poetry
+RUN poetry config virtualenvs.create false \
+    && poetry install --no-interaction --no-ansi --no-root --no-dev
+
+# Copy the rest of the application code
+COPY . .
 
 CMD ["python", "worker.py"]

@@ -9,7 +9,7 @@ services:
       - "5672:5672"
       - "15672:15672"
     networks:
-      - my_network
+      - transcoding_net
 
   minio:
     image: minio/minio
@@ -22,10 +22,12 @@ services:
       - "9000:9000"
       - "9001:9001"
     networks:
-      - my_network
+      - transcoding_net
 
   worker:
-    build: .
+    build:
+      context: worker/
+      dockerfile: Dockerfile
     container_name: worker
     environment:
       AWS_ACCESS_KEY_ID: minio
@@ -37,8 +39,8 @@ services:
       - rabbitmq
       - minio
     networks:
-      - my_network
+      - transcoding_net
 
 networks:
-  my_network:
+  transcoding_net:
     driver: bridge

@@ -6,6 +6,7 @@ import time
 from typing import Tuple
 
 import boto3
+from botocore.exceptions import ClientError
 import gi
 import pika
 
@@ -70,7 +71,7 @@ def connect_rabbitmq(
             )
             return pika.BlockingConnection(connection_parameters)
         except pika.exceptions.AMQPConnectionError:
-            logging.info(
+            logger.info(
                 f"Connection to RabbitMQ failed. Retrying in {retry_interval} seconds..."
             )
             retries += 1
@@ -96,8 +97,8 @@ def on_message(
     message_type = message.type
     if message_type == Gst.MessageType.ERROR:
         error, debug = message.parse_error()
-        logger.info("Error received: %s" % error)
-        logger.info("Debug info: %s" % debug)
+        logger.error("Error received: %s" % error)
+        logger.error("Debug info: %s" % debug)
         loop.quit()
     elif message_type == Gst.MessageType.EOS:
         logger.info("End of stream")
@@ -227,7 +228,7 @@ def handle_transcode_exception(
             }
         ),
     )
-    logger.info(f"Transcoding failed: {e.error_type}")
+    logger.error(f"Transcoding failed: {e.error_type}")
     ch.basic_ack(delivery_tag=method.delivery_tag)
 
 
@@ -256,7 +257,24 @@ def process_message(
         # Download the input chunk
         dl_start = time.time()
         logger.info(f"Downloading input chunk from S3: {input_key}")
-        s3_client.download_file(S3_BUCKET_NAME, input_key, input_file.name)
+        try:
+            s3_client.download_file(S3_BUCKET_NAME, input_key, input_file.name)
+        except ClientError as e:
+            logger.error(f"Unable to download input chunk: {e}")
+            ch.basic_publish(
+                exchange="",
+                routing_key=RESULTS_QUEUE_NAME,
+                body=json.dumps(
+                    {
+                        "status": "failed",
+                        "job_id": job_id,
+                        "error": str(e),
+                        "error_type": "s3_download",
+                    }
+                ),
+            )
+            ch.basic_ack(delivery_tag=method.delivery_tag)
+            return
         logger.info(
             f"Chunk finished downloading to: {input_file.name} in {time.time() - dl_start} seconds"
         )
@@ -282,7 +300,24 @@ def process_message(
 
         # Upload the output chunk
         logger.info(f"Uploading output chunk to S3: {output_key}")
-        s3_client.upload_file(output_file.name, S3_BUCKET_NAME, output_key)
+        try:
+            s3_client.upload_file(output_file.name, S3_BUCKET_NAME, output_key)
+        except ClientError as e:
+            logger.error(f"Unable to upload output chunk: {e}")
+            ch.basic_publish(
+                exchange="",
+                routing_key=RESULTS_QUEUE_NAME,
+                body=json.dumps(
+                    {
+                        "status": "failed",
+                        "job_id": job_id,
+                        "error": str(e),
+                        "error_type": "s3_upload",
+                    }
+                ),
+            )
+            ch.basic_ack(delivery_tag=method.delivery_tag)
+            return
 
     # Send a completion message with the output chunk's blob ID
     ch.basic_publish(
