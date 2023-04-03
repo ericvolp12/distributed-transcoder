@@ -65,9 +65,9 @@ Replace `your_access_key`, `your_secret_key`, and `your_bucket_name` with the ap
 
     job_data = {
         "job_id": "job1",
-        "input_key": "path/to/input_file",
-        "output_key": "path/to/output_file",
-        "transcode_options": "videoconvert ! x264enc",
+        "input_key": "path/to/input_file.mp4",
+        "output_key": "path/to/output_file.mp4",
+        "transcode_options": "filesrc location={{input_file}} ! qtdemux ! decodebin ! videoconvert ! x264enc ! {{progress}} ! mp4mux ! filesink location={{output_file}}",
     }
 
     channel.basic_publish(
@@ -80,6 +80,11 @@ Replace `your_access_key`, `your_secret_key`, and `your_bucket_name` with the ap
     ```
 
     Replace the `input_key`, `output_key`, and `transcode_options` with the appropriate values for your use case.
+
+    `transcode_options` has 3 placeholders for you to insert, they'll be replaced by the worker when parsing the transcode pipeline: 
+    - `{{input_file}}` will be filled with the temporary file location of the input chunk
+    - `{{output_file}}` will be filled with the temporary file location of the output chunk before upload
+    - `{{progress}}` will insert a progress report node like `progressreport update-freq=10 silent=true` and use that to provide status reports. Place it in the critical path of your slowest thread.
 
 3. Monitor the progress of the transcoding job by consuming messages from the transcoding_progress queue:
 
