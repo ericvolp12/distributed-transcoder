@@ -3,7 +3,7 @@ import logging
 import os
 import tempfile
 import time
-from typing import Optional, Tuple
+from typing import Tuple
 
 import boto3
 import gi
@@ -13,23 +13,28 @@ gi.require_version("Gst", "1.0")
 from gi.repository import GLib, Gst
 
 # Constants
-QUEUE_NAME = "transcoding_jobs"
+JOB_QUEUE_NAME = "transcoding_jobs"
 PROGRESS_QUEUE_NAME = "transcoding_progress"
+RESULTS_QUEUE_NAME = "transcoding_results"
 AWS_ACCESS_KEY_ID = os.environ["AWS_ACCESS_KEY_ID"]
 AWS_SECRET_ACCESS_KEY = os.environ["AWS_SECRET_ACCESS_KEY"]
 S3_BUCKET_NAME = os.environ["S3_BUCKET_NAME"]
 AWS_S3_ENDPOINT_URL = os.environ["AWS_S3_ENDPOINT_URL"]
 
-# Logging configuration
+# Set up logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s (%(name)s) [%(levelname)s]: %(message)s",
     handlers=[logging.StreamHandler()],
 )
-logging.getLogger("pika").setLevel(logging.CRITICAL)
-logging.getLogger("botocore").setLevel(logging.WARNING)
-logging.getLogger("gst").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
+
+for log_name, log_level in [
+    ("pika", logging.CRITICAL),
+    ("botocore", logging.WARNING),
+    ("gst", logging.WARNING),
+]:
+    logging.getLogger(log_name).setLevel(log_level)
 
 # Set up S3 client
 s3_client = boto3.client(
@@ -87,20 +92,20 @@ def on_message(
     :param data: A tuple containing the GLib main loop, the GStreamer pipeline, the progress channel, and the job ID.
     :return: True if the message was handled successfully.
     """
-    loop, pipeline, progress_channel, job_id = data
+    loop, pipeline, ch, job_id = data
     message_type = message.type
     if message_type == Gst.MessageType.ERROR:
         error, debug = message.parse_error()
-        print("Error received: %s" % error)
-        print("Debug info: %s" % debug)
+        logger.info("Error received: %s" % error)
+        logger.info("Debug info: %s" % debug)
         loop.quit()
     elif message_type == Gst.MessageType.EOS:
-        print("End of stream")
+        logger.info("End of stream")
         loop.quit()
     elif message_type == Gst.MessageType.STATE_CHANGED:
         old_state, new_state, pending_state = message.parse_state_changed()
         if message.src == pipeline:
-            print(
+            logger.info(
                 "Pipeline state changed from %s to %s"
                 % (old_state.value_nick, new_state.value_nick)
             )
@@ -111,31 +116,58 @@ def on_message(
         if structure and structure.get_name() == "progress":
             percent: float = structure.get_double("percent-double")[1]
             logger.info("Progress: {:.1f}%".format(percent))
-            progress_channel.basic_publish(
+            ch.basic_publish(
                 exchange="",
-                routing_key="transcoding_progress",
+                routing_key=PROGRESS_QUEUE_NAME,
                 body=json.dumps({"job_id": job_id, "progress": round(percent, 4)}),
             )
     else:
-        print("Unexpected message: %s" % message_type)
+        logger.debug("Unexpected message: %s" % message_type)
 
     return True
+
+
+class TranscodeException(Exception):
+    def __init__(self, error_type: str, *args):
+        super().__init__(*args)
+        self.error_type = error_type
+
+
+class FailedToPlay(TranscodeException):
+    "Raised when the pipeline cannot be played by GStreamer."
+
+    def __init__(self, *args):
+        super().__init__("pipeline_play", *args)
+
+
+class FailedToParsePipeline(TranscodeException):
+    "Raised when the pipeline cannot be parsed by GStreamer."
+
+    def __init__(self, *args):
+        super().__init__("pipeline_parse", *args)
+
+
+class FailedMidTranscode(TranscodeException):
+    "Raised when the pipeline fails after starting transcode."
+
+    def __init__(self, *args):
+        super().__init__("mid_transcode", *args)
 
 
 def transcode(
     input_file: str,
     output_file: str,
     transcode_options: str,
-    progress_channel: pika.channel.Channel,
+    ch: pika.channel.Channel,
     job_id: str,
-) -> Optional[str]:
+) -> str:
     """
     Transcode the input file to the output file using the specified transcode options and report progress to the channel.
 
     :param input_file: The path to the input file.
     :param output_file: The path to the output file.
     :param transcode_options: The GStreamer transcoding options.
-    :param progress_channel: The RabbitMQ channel for reporting progress.
+    :param ch: The RabbitMQ channel for reporting progress.
     :param job_id: The unique identifier for the transcoding job.
     :return: The path to the output file if successful, None otherwise.
     """
@@ -153,27 +185,50 @@ def transcode(
         pipeline = Gst.parse_launch(pipeline_str)
     except GLib.Error as e:
         logger.error(f"Unable to create pipeline: {e}")
-        return None
+        raise FailedToParsePipeline(e)
 
     bus = pipeline.get_bus()
     bus.add_signal_watch()
-    bus.connect("message", on_message, (loop, pipeline, progress_channel, job_id))
+    bus.connect("message", on_message, (loop, pipeline, ch, job_id))
 
     # Set the pipeline to the playing state
     ret = pipeline.set_state(Gst.State.PLAYING)
     if ret == Gst.StateChangeReturn.FAILURE:
         logger.error("Unable to set the pipeline to the playing state.")
-        return None
+        raise FailedToPlay("Unable to set the pipeline to the playing state.")
 
     # Start the GLib main loop
     try:
         loop.run()
     except Exception as e:
         logger.error(f"An error occurred while running the main loop: {e}")
+        raise FailedMidTranscode(e)
     finally:
         pipeline.set_state(Gst.State.NULL)
 
     return output_file
+
+
+def handle_transcode_exception(
+    ch: pika.channel.Channel,
+    method: pika.spec.Basic.Deliver,
+    e: TranscodeException,
+    job_id: str,
+):
+    ch.basic_publish(
+        exchange="",
+        routing_key=RESULTS_QUEUE_NAME,
+        body=json.dumps(
+            {
+                "status": "failed",
+                "job_id": job_id,
+                "error": str(e),
+                "error_type": e.error_type,
+            }
+        ),
+    )
+    logger.info(f"Transcoding failed: {e.error_type}")
+    ch.basic_ack(delivery_tag=method.delivery_tag)
 
 
 def process_message(
@@ -181,7 +236,6 @@ def process_message(
     method: pika.spec.Basic.Deliver,
     properties: pika.spec.BasicProperties,
     body: bytes,
-    progress_channel: pika.channel.Channel,
 ) -> None:
     """
     Process a transcoding job message received from the queue.
@@ -208,16 +262,21 @@ def process_message(
         )
 
         # Transcode the input chunk
-        result = transcode(
-            input_file.name,
-            output_file.name,
-            transcode_options,
-            progress_channel,
-            job_id,
-        )
-        if result is None:
-            logger.error("Transcoding failed")
-            ch.basic_ack(delivery_tag=method.delivery_tag)
+        try:
+            transcode(
+                input_file.name,
+                output_file.name,
+                transcode_options,
+                ch,
+                job_id,
+            )
+        except TranscodeException as e:
+            handle_transcode_exception(ch, method, e, job_id)
+            return
+        except Exception as e:
+            handle_transcode_exception(
+                ch, method, TranscodeException("unknown", str(e)), job_id
+            )
             return
         logger.info("Transcoding completed")
 
@@ -228,7 +287,7 @@ def process_message(
     # Send a completion message with the output chunk's blob ID
     ch.basic_publish(
         exchange="",
-        routing_key="transcoding_results",
+        routing_key=RESULTS_QUEUE_NAME,
         body=json.dumps(
             {"status": "completed", "output_key": output_key, "job_id": job_id}
         ),
@@ -253,18 +312,17 @@ def main():
         )
         return
 
+    # Initialize RabbitMQ Queues for each type of message stream
     channel = connection.channel()
-    channel.queue_declare(queue=QUEUE_NAME)
-
-    # Set up a channel for reporting progress
-    progress_channel = connection.channel()
-    progress_channel.queue_declare(queue=PROGRESS_QUEUE_NAME)
+    channel.queue_declare(queue=JOB_QUEUE_NAME)
+    channel.queue_declare(queue=PROGRESS_QUEUE_NAME)
+    channel.queue_declare(queue=RESULTS_QUEUE_NAME)
 
     channel.basic_qos(prefetch_count=1)
     channel.basic_consume(
-        queue=QUEUE_NAME,
+        queue=JOB_QUEUE_NAME,
         on_message_callback=lambda ch, method, properties, body: process_message(
-            ch, method, properties, body, progress_channel
+            ch, method, properties, body
         ),
     )
 

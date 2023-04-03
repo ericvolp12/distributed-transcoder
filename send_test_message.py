@@ -24,7 +24,8 @@ job_data = {
 # Configure logging
 logging.getLogger("pika").setLevel(logging.WARNING)
 logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+    level=logging.INFO,
+    format="%(asctime)s (%(name)s) [%(levelname)s]: %(message)s",
 )
 
 # Connect to RabbitMQ with credentials
@@ -73,7 +74,20 @@ def result_callback(
     logging.info(f"(Job: {msg['job_id']}) Result: {msg['status']}")
     if msg["job_id"] == job_data["job_id"] and msg["status"] == "completed":
         # This is the result for the test job, so stop consuming
-        logging.info(f"Test job completed in {time.time() - start:.2f} seconds.")
+        logging.info(
+            f"(Job: {msg['job_id']}) Successfully processed after {time.time() - start:.2f} seconds."
+        )
+        ch.stop_consuming()
+    if (
+        msg["job_id"] == job_data["job_id"]
+        and msg["status"] == "failed"
+        and msg["error"]
+        and msg["error_type"]
+    ):
+        # This is the result for the test job, so stop consuming
+        logging.info(
+            f"(Job: {msg['job_id']}) Failed to process after {time.time() - start:.2f} seconds: ({msg['error_type']}) {msg['error']}"
+        )
         ch.stop_consuming()
 
 
