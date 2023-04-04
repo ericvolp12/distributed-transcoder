@@ -1,8 +1,14 @@
 import json
 import logging
 import time
+from dataclasses import asdict
 
 import pika
+from distributed_transcoder_common import (
+    JobProgressMessage,
+    JobResultMessage,
+    JobSubmissionMessage,
+)
 from pika.adapters.blocking_connection import BlockingChannel
 from pika.spec import Basic, BasicProperties
 
@@ -10,16 +16,16 @@ QUEUE_NAME = "transcoding_jobs"
 PROGRESS_QUEUE_NAME = "transcoding_progress"
 RESULTS_QUEUE_NAME = "transcoding_results"
 
-# Job data with input_key, output_key, and transcode options
-job_data = {
-    "job_id": "test_job_2",
-    "input_key": "test_chunk_in_1.mp4",
-    "output_key": "test_chunk_out_1.mp4",
-    "transcode_options": "filesrc location={{input_file}} ! qtdemux name=d \
+
+job_submission_message = JobSubmissionMessage(
+    job_id="test_job_2",
+    input_s3_path="test_chunk_in_1.mp4",
+    output_s3_path="test_chunk_out_1.mp4",
+    transcode_options="filesrc location={{input_file}} ! qtdemux name=d \
         mp4mux name=mux ! filesink location={{output_file}} \
         d.audio_0 ! queue max-size-buffers=0 max-size-bytes=0 max-size-time=0 ! decodebin ! audioconvert ! avenc_aac ! mux.audio_0 \
         d.video_0 ! decodebin ! videoscale ! video/x-raw,width=640,height=480 ! x265enc bitrate=768 ! {{progress}} ! h265parse ! mux.video_0",
-}
+)
 
 # Configure logging
 logging.getLogger("pika").setLevel(logging.WARNING)
@@ -44,20 +50,20 @@ channel.queue_declare(queue=RESULTS_QUEUE_NAME)
 channel.basic_publish(
     exchange="",
     routing_key=QUEUE_NAME,
-    body=json.dumps(job_data),
+    body=json.dumps(asdict(job_submission_message)),
 )
 
 start = time.time()
 
-logging.info(f"Test job submitted: {job_data}")
+logging.info(f"Test job submitted: {job_submission_message}")
 
 
 def progress_callback(
     ch: BlockingChannel, method: Basic.Deliver, properties: BasicProperties, body: str
 ) -> None:
     """Handle progress updates by logging the job progress percentage."""
-    msg = json.loads(body)
-    logging.info(f"(Job: {msg['job_id']}) Progress: {msg['progress']:.2f}%")
+    msg = JobProgressMessage(**json.loads(body))
+    logging.info(f"(Job: {msg.job_id}) Progress: {msg.progress:.2f}%")
 
 
 # Consume messages from the progress queue
@@ -70,23 +76,18 @@ def result_callback(
     ch: BlockingChannel, method: Basic.Deliver, properties: BasicProperties, body: str
 ) -> None:
     """Handle job results by logging the job status."""
-    msg = json.loads(body)
-    logging.info(f"(Job: {msg['job_id']}) Result: {msg['status']}")
-    if msg["job_id"] == job_data["job_id"] and msg["status"] == "completed":
+    result = JobResultMessage(**json.loads(body))
+    logging.info(f"(Job: {result.job_id}) Result: {result.status}")
+    if result.status == "completed":
         # This is the result for the test job, so stop consuming
         logging.info(
-            f"(Job: {msg['job_id']}) Successfully processed after {time.time() - start:.2f} seconds."
+            f"(Job: {result.job_id}) Successfully processed after {time.time() - start:.2f} seconds."
         )
         ch.stop_consuming()
-    if (
-        msg["job_id"] == job_data["job_id"]
-        and msg["status"] == "failed"
-        and msg["error"]
-        and msg["error_type"]
-    ):
+    if result.status == "failed":
         # This is the result for the test job, so stop consuming
         logging.info(
-            f"(Job: {msg['job_id']}) Failed to process after {time.time() - start:.2f} seconds: ({msg['error_type']}) {msg['error']}"
+            f"(Job: {result.job_id}) Failed to process after {time.time() - start:.2f} seconds: ({result.error_type}) {result.error}"
         )
         ch.stop_consuming()
 

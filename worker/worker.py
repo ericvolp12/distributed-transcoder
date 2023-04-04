@@ -3,20 +3,37 @@ import logging
 import os
 import tempfile
 import time
+from dataclasses import asdict
 from typing import Tuple
 
 import boto3
-from botocore.exceptions import ClientError
 import gi
 import pika
+from botocore.exceptions import ClientError
+from distributed_transcoder_common import (
+    JobProgressMessage,
+    JobResultMessage,
+    JobSubmissionMessage,
+)
+from errors import (
+    FailedMidTranscode,
+    FailedToParsePipeline,
+    FailedToPlay,
+    TranscodeException,
+)
+from pika.channel import Channel
+from pika.spec import Basic, BasicProperties
+from work_queue import (
+    JOB_QUEUE_NAME,
+    PROGRESS_QUEUE_NAME,
+    RESULTS_QUEUE_NAME,
+    init_channels,
+)
 
 gi.require_version("Gst", "1.0")
 from gi.repository import GLib, Gst
 
 # Constants
-JOB_QUEUE_NAME = "transcoding_jobs"
-PROGRESS_QUEUE_NAME = "transcoding_progress"
-RESULTS_QUEUE_NAME = "transcoding_results"
 AWS_ACCESS_KEY_ID = os.environ["AWS_ACCESS_KEY_ID"]
 AWS_SECRET_ACCESS_KEY = os.environ["AWS_SECRET_ACCESS_KEY"]
 S3_BUCKET_NAME = os.environ["S3_BUCKET_NAME"]
@@ -46,44 +63,10 @@ s3_client = boto3.client(
 )
 
 
-def connect_rabbitmq(
-    host: str,
-    port: int,
-    credentials: pika.PlainCredentials,
-    retry_interval: int = 5,
-    max_retries: int = 12,
-) -> pika.BlockingConnection:
-    """
-    Connect to RabbitMQ with the provided host, port, and credentials.
-
-    :param host: The RabbitMQ host address.
-    :param port: The RabbitMQ port.
-    :param credentials: The authentication credentials for the RabbitMQ server.
-    :param retry_interval: The interval (in seconds) between retries when the connection fails.
-    :param max_retries: The maximum number of retries before giving up on connecting.
-    :return: A blocking connection to the RabbitMQ server.
-    """
-    retries = 0
-    while retries < max_retries:
-        try:
-            connection_parameters = pika.ConnectionParameters(
-                host, port, "/", credentials
-            )
-            return pika.BlockingConnection(connection_parameters)
-        except pika.exceptions.AMQPConnectionError:
-            logger.info(
-                f"Connection to RabbitMQ failed. Retrying in {retry_interval} seconds..."
-            )
-            retries += 1
-            time.sleep(retry_interval)
-
-    raise Exception("Could not connect to RabbitMQ after multiple retries.")
-
-
-def on_message(
+def on_gst_message(
     bus: Gst.Bus,
     message: Gst.Message,
-    data: Tuple[GLib.MainLoop, Gst.Pipeline, pika.channel.Channel, str],
+    data: Tuple[GLib.MainLoop, Gst.Pipeline, Channel, str],
 ) -> bool:
     """
     Handle messages received from the GStreamer pipeline.
@@ -120,7 +103,7 @@ def on_message(
             ch.basic_publish(
                 exchange="",
                 routing_key=PROGRESS_QUEUE_NAME,
-                body=json.dumps({"job_id": job_id, "progress": round(percent, 4)}),
+                body=json.dumps(asdict(JobProgressMessage(job_id, round(percent, 4)))),
             )
     else:
         logger.debug("Unexpected message: %s" % message_type)
@@ -128,38 +111,11 @@ def on_message(
     return True
 
 
-class TranscodeException(Exception):
-    def __init__(self, error_type: str, *args):
-        super().__init__(*args)
-        self.error_type = error_type
-
-
-class FailedToPlay(TranscodeException):
-    "Raised when the pipeline cannot be played by GStreamer."
-
-    def __init__(self, *args):
-        super().__init__("pipeline_play", *args)
-
-
-class FailedToParsePipeline(TranscodeException):
-    "Raised when the pipeline cannot be parsed by GStreamer."
-
-    def __init__(self, *args):
-        super().__init__("pipeline_parse", *args)
-
-
-class FailedMidTranscode(TranscodeException):
-    "Raised when the pipeline fails after starting transcode."
-
-    def __init__(self, *args):
-        super().__init__("mid_transcode", *args)
-
-
 def transcode(
     input_file: str,
     output_file: str,
     transcode_options: str,
-    ch: pika.channel.Channel,
+    ch: Channel,
     job_id: str,
 ) -> str:
     """
@@ -190,7 +146,7 @@ def transcode(
 
     bus = pipeline.get_bus()
     bus.add_signal_watch()
-    bus.connect("message", on_message, (loop, pipeline, ch, job_id))
+    bus.connect("message", on_gst_message, (loop, pipeline, ch, job_id))
 
     # Set the pipeline to the playing state
     ret = pipeline.set_state(Gst.State.PLAYING)
@@ -211,31 +167,49 @@ def transcode(
 
 
 def handle_transcode_exception(
-    ch: pika.channel.Channel,
-    method: pika.spec.Basic.Deliver,
+    ch: Channel,
+    method: Basic.Deliver,
     e: TranscodeException,
     job_id: str,
+):
+    send_transcode_result(
+        ch, method, "failed", job_id, error=str(e), error_type=e.error_type
+    )
+
+
+def send_transcode_result(
+    ch: Channel,
+    method: Basic.Deliver,
+    status: str,
+    job_id: str,
+    output_s3_path: str = None,
+    error: str = None,
+    error_type: str = None,
 ):
     ch.basic_publish(
         exchange="",
         routing_key=RESULTS_QUEUE_NAME,
         body=json.dumps(
-            {
-                "status": "failed",
-                "job_id": job_id,
-                "error": str(e),
-                "error_type": e.error_type,
-            }
+            asdict(
+                JobResultMessage(
+                    status,
+                    job_id,
+                    output_s3_path,
+                    error,
+                    error_type,
+                )
+            )
         ),
     )
-    logger.error(f"Transcoding failed: {e.error_type}")
+    if error:
+        logger.error(f"Transcoding failed: {error_type}")
     ch.basic_ack(delivery_tag=method.delivery_tag)
 
 
-def process_message(
-    ch: pika.channel.Channel,
-    method: pika.spec.Basic.Deliver,
-    properties: pika.spec.BasicProperties,
+def process_workqueue_message(
+    ch: Channel,
+    method: Basic.Deliver,
+    properties: BasicProperties,
     body: bytes,
 ) -> None:
     """
@@ -247,30 +221,30 @@ def process_message(
     :param body: The message body, containing the job data as JSON.
     """
     logger.info("Received a new transcoding job")
-    job_data = json.loads(body)
-    job_id = job_data["job_id"]
-    input_key = job_data["input_key"]
-    output_key = job_data["output_key"]
-    transcode_options = job_data["transcode_options"]
+    job_data = JobSubmissionMessage(**json.loads(body))
 
     with tempfile.NamedTemporaryFile() as input_file, tempfile.NamedTemporaryFile() as output_file:
         # Download the input chunk
         dl_start = time.time()
-        logger.info(f"Downloading input chunk from S3: {input_key}")
+        logger.info(f"Downloading input chunk from S3: {job_data.input_s3_path}")
         try:
-            s3_client.download_file(S3_BUCKET_NAME, input_key, input_file.name)
+            s3_client.download_file(
+                S3_BUCKET_NAME, job_data.input_s3_path, input_file.name
+            )
         except ClientError as e:
             logger.error(f"Unable to download input chunk: {e}")
             ch.basic_publish(
                 exchange="",
                 routing_key=RESULTS_QUEUE_NAME,
                 body=json.dumps(
-                    {
-                        "status": "failed",
-                        "job_id": job_id,
-                        "error": str(e),
-                        "error_type": "s3_download",
-                    }
+                    asdict(
+                        JobResultMessage(
+                            status="failed",
+                            job_id=job_data.job_id,
+                            error=str(e),
+                            error_type="s3_download",
+                        )
+                    )
                 ),
             )
             ch.basic_ack(delivery_tag=method.delivery_tag)
@@ -284,50 +258,46 @@ def process_message(
             transcode(
                 input_file.name,
                 output_file.name,
-                transcode_options,
+                job_data.transcode_options,
                 ch,
-                job_id,
+                job_data.job_id,
             )
         except TranscodeException as e:
-            handle_transcode_exception(ch, method, e, job_id)
+            handle_transcode_exception(ch, method, e, job_data.job_id)
             return
         except Exception as e:
             handle_transcode_exception(
-                ch, method, TranscodeException("unknown", str(e)), job_id
+                ch, method, TranscodeException("unknown", str(e)), job_data.job_id
             )
             return
         logger.info("Transcoding completed")
 
         # Upload the output chunk
-        logger.info(f"Uploading output chunk to S3: {output_key}")
+        logger.info(f"Uploading output chunk to S3: {job_data.output_s3_path}")
         try:
-            s3_client.upload_file(output_file.name, S3_BUCKET_NAME, output_key)
+            s3_client.upload_file(
+                output_file.name, S3_BUCKET_NAME, job_data.output_s3_path
+            )
         except ClientError as e:
             logger.error(f"Unable to upload output chunk: {e}")
-            ch.basic_publish(
-                exchange="",
-                routing_key=RESULTS_QUEUE_NAME,
-                body=json.dumps(
-                    {
-                        "status": "failed",
-                        "job_id": job_id,
-                        "error": str(e),
-                        "error_type": "s3_upload",
-                    }
-                ),
+            send_transcode_result(
+                ch,
+                method,
+                "failed",
+                job_data.job_id,
+                error=str(e),
+                error_type="s3_upload",
             )
-            ch.basic_ack(delivery_tag=method.delivery_tag)
             return
 
     # Send a completion message with the output chunk's blob ID
-    ch.basic_publish(
-        exchange="",
-        routing_key=RESULTS_QUEUE_NAME,
-        body=json.dumps(
-            {"status": "completed", "output_key": output_key, "job_id": job_id}
-        ),
+    send_transcode_result(
+        ch,
+        method,
+        "completed",
+        job_data.job_id,
+        output_s3_path=job_data.output_s3_path,
     )
-    ch.basic_ack(delivery_tag=method.delivery_tag)
     logger.info("Job completed and result message sent")
 
 
@@ -340,23 +310,18 @@ def main():
     rabbitmq_port = 5672
 
     try:
-        connection = connect_rabbitmq(rabbitmq_host, rabbitmq_port, credentials)
+        channel, connection = init_channels(rabbitmq_host, rabbitmq_port, credentials)
+        logger.info(f"Connected to RabbitMQ on {rabbitmq_host}:{rabbitmq_port}")
     except Exception:
         logger.error(
             f"Unable to connect to RabbitMQ on {rabbitmq_host}:{rabbitmq_port}"
         )
         return
 
-    # Initialize RabbitMQ Queues for each type of message stream
-    channel = connection.channel()
-    channel.queue_declare(queue=JOB_QUEUE_NAME)
-    channel.queue_declare(queue=PROGRESS_QUEUE_NAME)
-    channel.queue_declare(queue=RESULTS_QUEUE_NAME)
-
     channel.basic_qos(prefetch_count=1)
     channel.basic_consume(
         queue=JOB_QUEUE_NAME,
-        on_message_callback=lambda ch, method, properties, body: process_message(
+        on_message_callback=lambda ch, method, properties, body: process_workqueue_message(
             ch, method, properties, body
         ),
     )
