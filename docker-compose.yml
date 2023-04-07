@@ -41,6 +41,24 @@ services:
     networks:
       - transcoding_net
 
+  api:
+    build:
+      context: api/
+      dockerfile: Dockerfile
+    container_name: api
+    environment:
+      AWS_ACCESS_KEY_ID: minio
+      AWS_SECRET_ACCESS_KEY: minio123
+      S3_BUCKET_NAME: transcode
+      AWS_S3_ENDPOINT_URL: http://minio:9000
+    ports:
+      - "8000:8000"
+    depends_on:
+      - rabbitmq
+      - minio
+    networks:
+      - transcoding_net
+
 networks:
   transcoding_net:
     driver: bridge

@@ -1,0 +1,23 @@
+[tool.poetry]
+name = "distributed-transcoder-api"
+version = "0.1.0"
+description = "A FastAPI service to handling transcoding jobs for a distributed transcoding system that uses RabbitMQ, S3, and GStreamer"
+authors = ["Eric Volpert <ericvolp12@gmail.com>"]
+license = "MIT"
+
+[tool.poetry.dependencies]
+python = "^3.9"
+fastapi = "^0.70.0"
+uvicorn = "^0.15.0"
+pydantic = "^1.9.0"
+pika = "^1.2.0"
+boto3 = "^1.20.0"
+distributed-transcoder-common = "^0.2.2"
+python-multipart="^0.0.6"
+
+[tool.poetry.dev-dependencies]
+black  = "^23.3.0"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
