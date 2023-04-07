@@ -1,6 +1,7 @@
 from typing import Dict, List
 
-from fastapi import WebSocket, WebSocketDisconnect
+from fastapi import WebSocket
+from starlette.websockets import WebSocketDisconnect
 
 
 class EventManager:
@@ -23,7 +24,6 @@ class EventManager:
                     await websocket.send_text(message)
                     if message_type == "completion":
                         await websocket.close()
-                        dead_connections.append(websocket)
                 except WebSocketDisconnect:
                     dead_connections.append(websocket)
 
