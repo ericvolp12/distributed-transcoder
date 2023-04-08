@@ -8,12 +8,14 @@ from typing import Dict
 
 import boto3
 import pika
+from botocore.exceptions import ClientError
 from distributed_transcoder_common import (
     JobProgressMessage,
     JobResultMessage,
     JobSubmissionMessage,
 )
 from fastapi import FastAPI, File, HTTPException, UploadFile, WebSocket
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pika.adapters.blocking_connection import BlockingChannel
 from pydantic import BaseModel
@@ -52,6 +54,18 @@ for log_name, log_level in [
     logging.getLogger(log_name).setLevel(log_level)
 
 app = FastAPI()
+origins = [
+    "http://localhost",
+    "http://localhost:3000",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 s3 = boto3.client(
     service_name="s3",
     aws_access_key_id=AWS_ACCESS_KEY_ID,
@@ -82,9 +96,7 @@ async def progress_callback(ch: BlockingChannel, method, properties, body):
     msg = JobProgressMessage(**json.loads(body))
     # Store the progress message in a dictionary so we can serve it to newly connected clients
     last_progress_messages[msg.job_id] = msg
-    await event_manager.send_message(
-        msg.job_id, "progress", f"Progress: {msg.progress:.2f}%"
-    )
+    await event_manager.send_message(msg.job_id, "progress", asdict(msg))
 
 
 async def result_callback(ch: BlockingChannel, method, properties, body):
@@ -102,16 +114,8 @@ async def result_callback(ch: BlockingChannel, method, properties, body):
     # Store the result in a dictionary so we can tell newly connected clients that the job is done
     finished_jobs[result.job_id] = result
     last_progress_messages.pop(result.job_id, None)
-    if result.status == "completed":
-        await event_manager.send_message(
-            result.job_id, "completion", f"Job {result.job_id} completed."
-        )
-    if result.status == "failed":
-        await event_manager.send_message(
-            result.job_id,
-            "completion",
-            f"Job {result.job_id} failed: ({result.error_type}) {result.error}",
-        )
+    if result.status == "completed" or result.status == "failed":
+        await event_manager.send_message(result.job_id, "completion", asdict(result))
 
 
 loop = asyncio.get_event_loop()
@@ -169,17 +173,13 @@ async def progress(websocket: WebSocket, job_id: str):
 
     # If the job is already done, send the completion message and close the connection
     if job_id in finished_jobs:
-        await websocket.send_text(
-            f"Job {job_id} completed with status: {finished_jobs[job_id].status}"
-        )
+        await websocket.send_json(asdict(finished_jobs[job_id]))
         await websocket.close()
         return
 
     # If we have a progress message for the job, send it to the client
     if job_id in last_progress_messages:
-        await websocket.send_text(
-            f"Progress: {last_progress_messages[job_id].progress:.2f}%"
-        )
+        await websocket.send_json(asdict(last_progress_messages[job_id]))
 
     # Add the client to the event manager so we can send it progress messages
     event_manager.add_connection(job_id, websocket)
@@ -207,3 +207,21 @@ async def download_file(filename: str):
         yield file
 
     return StreamingResponse(file_stream(), media_type="application/octet-stream")
+
+
+@app.get("/signed_download/{filename}")
+async def generate_presigned_url(filename: str):
+    try:
+        # Generate a pre-signed URL for the given file
+        presigned_url = s3.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": S3_BUCKET_NAME, "Key": filename},
+            ExpiresIn=3600,  # URL valid for 1 hour
+        )
+    except ClientError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    if not presigned_url:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    return {"url": presigned_url}

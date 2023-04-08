@@ -21,7 +21,7 @@ class EventManager:
             dead_connections = []
             for websocket in self.connections[job_id]:
                 try:
-                    await websocket.send_text(message)
+                    await websocket.send_json(message)
                     if message_type == "completion":
                         await websocket.close()
                 except WebSocketDisconnect:
