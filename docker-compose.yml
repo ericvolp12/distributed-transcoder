@@ -11,6 +11,18 @@ services:
     networks:
       - transcoding_net
 
+  postgres:
+    image: postgres:13
+    container_name: postgres
+    environment:
+      POSTGRES_USER: transcoder
+      POSTGRES_PASSWORD: OW14F15rBHRLivihLral
+      POSTGRES_DB: transcoding_jobs
+    ports:
+      - "5432:5432"
+    networks:
+      - transcoding_net
+
   minio:
     image: minio/minio
     container_name: minio
@@ -35,6 +47,10 @@ services:
       S3_BUCKET_NAME: transcode
       AWS_S3_ENDPOINT_URL: http://minio:9000
       GST_DEBUG: 1
+      POSTGRES_USER: transcoder
+      POSTGRES_PASSWORD: OW14F15rBHRLivihLral
+      POSTGRES_DB: transcoding_jobs
+      POSTGRES_HOST: postgres
     depends_on:
       - rabbitmq
       - minio
@@ -51,6 +67,10 @@ services:
       AWS_SECRET_ACCESS_KEY: minio123
       S3_BUCKET_NAME: transcode
       AWS_S3_ENDPOINT_URL: http://minio:9000
+      POSTGRES_USER: transcoder
+      POSTGRES_PASSWORD: OW14F15rBHRLivihLral
+      POSTGRES_DB: transcoding_jobs
+      POSTGRES_HOST: postgres
     ports:
       - "8000:8000"
     depends_on:

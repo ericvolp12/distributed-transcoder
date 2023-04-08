@@ -21,7 +21,7 @@ const Layout = ({ children, title = 'Video Transcoding Service' }: Props) => {
     setInputPath(inputPath);
   };
 
-  const handleJobSubmit = (jobId: string, outputPath: string, transcodeOptions: string) => {
+  const handleJobSubmit = (jobId: string, outputPath: string) => {
     setJobId(jobId);
     setOutputPath(outputPath); // Update the outputPath state
     // TODO: Implement the job submission handling

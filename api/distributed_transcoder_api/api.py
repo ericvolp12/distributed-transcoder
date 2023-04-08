@@ -4,7 +4,7 @@ import logging
 import os
 import tempfile
 from dataclasses import asdict
-from typing import Dict
+from typing import Dict, List
 
 import boto3
 import pika
@@ -14,29 +14,22 @@ from distributed_transcoder_common import (
     JobResultMessage,
     JobSubmissionMessage,
 )
-from fastapi import FastAPI, File, HTTPException, UploadFile, WebSocket
+from fastapi import FastAPI, File, HTTPException, Query, UploadFile, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pika.adapters.blocking_connection import BlockingChannel
-from pydantic import BaseModel
 from starlette.websockets import WebSocketDisconnect
 
 from .managers import EventManager
+from .models import Job, Preset, init_db
 from .work_queue import JOB_QUEUE_NAME, consume_events, init_channels
+from .schemas import PresetCreate, PresetUpdate, PresetOut, TranscodingJob
 
 # Constants
 AWS_ACCESS_KEY_ID = os.environ["AWS_ACCESS_KEY_ID"]
 AWS_SECRET_ACCESS_KEY = os.environ["AWS_SECRET_ACCESS_KEY"]
 S3_BUCKET_NAME = os.environ["S3_BUCKET_NAME"]
 AWS_S3_ENDPOINT_URL = os.environ["AWS_S3_ENDPOINT_URL"]
-
-
-class TranscodingJob(BaseModel):
-    job_id: str
-    input_s3_path: str
-    output_s3_path: str
-    transcode_options: str
-
 
 # Set up logging
 logging.basicConfig(
@@ -73,6 +66,8 @@ s3 = boto3.client(
     endpoint_url=AWS_S3_ENDPOINT_URL,
 )
 
+init_db(app)
+
 credentials = pika.PlainCredentials("guest", "guest")
 channel, connection = init_channels("rabbitmq", 5672, credentials)
 
@@ -96,6 +91,8 @@ async def progress_callback(ch: BlockingChannel, method, properties, body):
     msg = JobProgressMessage(**json.loads(body))
     # Store the progress message in a dictionary so we can serve it to newly connected clients
     last_progress_messages[msg.job_id] = msg
+    # Update the job state to 'in-progress'
+    await Job.filter(job_id=msg.job_id).update(state="in-progress")
     await event_manager.send_message(msg.job_id, "progress", asdict(msg))
 
 
@@ -114,6 +111,10 @@ async def result_callback(ch: BlockingChannel, method, properties, body):
     # Store the result in a dictionary so we can tell newly connected clients that the job is done
     finished_jobs[result.job_id] = result
     last_progress_messages.pop(result.job_id, None)
+    # Update the job state to 'completed' or 'failed'
+    await Job.filter(job_id=result.job_id).update(
+        state=result.status, error=result.error, error_type=result.error_type
+    )
     if result.status == "completed" or result.status == "failed":
         await event_manager.send_message(result.job_id, "completion", asdict(result))
 
@@ -142,13 +143,79 @@ async def submit_job(job: TranscodingJob):
     Returns:
         Dict[str, str]: A dictionary containing the job ID
     """
-    job_submission_message = JobSubmissionMessage(**job.dict())
+    if job.preset_id:
+        preset = await Preset.get_or_none(preset_id=job.preset_id)
+        if not preset:
+            raise HTTPException(status_code=404, detail="Preset not found")
+        job.preset_id = preset.preset_id
+        job.pipeline = preset.pipeline
+    elif job.pipeline is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Either preset_id or pipeline must be provided",
+        )
+
+    job_submission_message = JobSubmissionMessage(
+        job_id=job.job_id,
+        input_s3_path=job.input_s3_path,
+        output_s3_path=job.output_s3_path,
+        transcode_options=job.pipeline,
+    )
     channel.basic_publish(
         exchange="",
         routing_key=JOB_QUEUE_NAME,
         body=json.dumps(asdict(job_submission_message)),
     )
+    # Create a record in the database
+    await Job.create(**job.dict())
     return {"job_id": job.job_id}
+
+
+@app.get("/jobs")
+async def list_jobs(skip: int = Query(0, ge=0), limit: int = Query(10, ge=1)):
+    jobs = await Job.all().offset(skip).limit(limit)
+    return {"jobs": jobs}
+
+
+@app.post("/presets", response_model=PresetOut)
+async def create_preset(preset: PresetCreate):
+    new_preset = await Preset.create(**preset.dict())
+    return new_preset
+
+
+@app.get("/presets", response_model=List[PresetOut])
+async def list_presets(skip: int = Query(0, ge=0), limit: int = Query(10, ge=1)):
+    presets = await Preset.all().offset(skip).limit(limit)
+    return presets
+
+
+@app.get("/presets/{preset_id}", response_model=PresetOut)
+async def get_preset(preset_id: str):
+    preset = await Preset.get_or_none(preset_id=preset_id)
+    if not preset:
+        raise HTTPException(status_code=404, detail="Preset not found")
+    return preset
+
+
+@app.put("/presets/{preset_id}", response_model=PresetOut)
+async def update_preset(preset_id: str, preset: PresetUpdate):
+    existing_preset = await Preset.get_or_none(preset_id=preset_id)
+    if not existing_preset:
+        raise HTTPException(status_code=404, detail="Preset not found")
+
+    for key, value in preset.dict(exclude_none=True).items():
+        setattr(existing_preset, key, value)
+    await existing_preset.save()
+    return existing_preset
+
+
+@app.delete("/presets/{preset_id}", response_model=PresetOut)
+async def delete_preset(preset_id: str):
+    preset = await Preset.get_or_none(preset_id=preset_id)
+    if not preset:
+        raise HTTPException(status_code=404, detail="Preset not found")
+    await preset.delete()
+    return preset
 
 
 @app.websocket("/progress/{job_id}")

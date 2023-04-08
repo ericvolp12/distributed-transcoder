@@ -1,20 +1,62 @@
-import { useState } from 'react';
+import { useState, useEffect, MouseEvent } from 'react';
 
 interface SubmitJobProps {
     jobId: string;
     inputPath: string;
     setInputPath: (inputPath: string) => void;
-    onJobSubmit: (id: string, outputPath: string, transcode_options: string) => void;
+    onJobSubmit: (id: string, outputPath: string) => void;
 }
+
+interface JobSubmitPayload {
+    job_id: string,
+    input_s3_path: string,
+    output_s3_path: string,
+    preset_id?: string,
+    pipeline?: string,
+}
+
 
 const SubmitJob: React.FC<SubmitJobProps> = ({ jobId, inputPath, setInputPath, onJobSubmit }) => {
     const [outputPath, setOutputPath] = useState('');
-    const [transcodeOptions, setTranscodeOptions] = useState('');
+    const [pipeline, setPipeline] = useState('');
     const [submitting, setSubmitting] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [presets, setPresets] = useState([]);
+    const [selectedPreset, setSelectedPreset] = useState(null);
+    const [usePreset, setUsePreset] = useState(true);
 
-    const handleSubmit = async (e) => {
-        if (!inputPath || !outputPath || !jobId || !transcodeOptions) {
+    useEffect(() => {
+        const fetchPresets = async () => {
+            try {
+                const response = await fetch('http://localhost:8000/presets');
+                const presetsData = await response.json();
+                setPresets(presetsData);
+            } catch (error) {
+                console.error('Error fetching presets:', error);
+            }
+        };
+
+        fetchPresets();
+    }, []);
+
+    const handlePresetChange = (e) => {
+        const presetId = e.target.value;
+        setSelectedPreset(presetId);
+        if (presetId) {
+            setPipeline('');
+        }
+    };
+
+    const handleToggleChange = (e) => {
+        setUsePreset(e.target.checked);
+        if (!e.target.checked) {
+            setSelectedPreset(null);
+            setPipeline('');
+        }
+    };
+
+    const handleSubmit = async (e: MouseEvent) => {
+        if (!inputPath || !outputPath || !jobId || (!pipeline && !selectedPreset)) {
             setError('All fields are required');
             return;
         }
@@ -22,14 +64,19 @@ const SubmitJob: React.FC<SubmitJobProps> = ({ jobId, inputPath, setInputPath, o
         setSubmitting(true);
         setError(null);
 
-        const jobData = {
+        let jobData: JobSubmitPayload = {
             job_id: jobId,
             input_s3_path: inputPath,
             output_s3_path: outputPath,
-            transcode_options: transcodeOptions,
         };
 
-        onJobSubmit(jobId, outputPath, transcodeOptions);
+        if (usePreset) {
+            jobData = { ...jobData, preset_id: selectedPreset };
+        } else {
+            jobData = { ...jobData, pipeline };
+        }
+
+        onJobSubmit(jobId, outputPath);
 
         try {
             const response = await fetch('http://localhost:8000/submit_job', {
@@ -79,21 +126,57 @@ const SubmitJob: React.FC<SubmitJobProps> = ({ jobId, inputPath, setInputPath, o
                 />
             </div>
             <div className="mb-4">
-                <label htmlFor="transcode-options" className="block text-sm font-medium leading-6 text-gray-900">
-                    Transcoding Settings
-                </label>
-                <textarea
-                    name="transcode-options"
-                    id="transcode-options"
-                    className="block w-full rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
-                    value={transcodeOptions}
-                    onChange={(e) => setTranscodeOptions(e.target.value)}
-                    rows={5}
-                />
+                <div className="flex items-center">
+                    <input
+                        type="checkbox"
+                        id="use-preset"
+                        className="focus:ring-indigo-500 h-4 w-4 text-indigo-600 border-gray-300 rounded"
+                        checked={usePreset}
+                        onChange={handleToggleChange}
+                    />
+                    <label htmlFor="use-preset" className="ml-2 block text-sm font-medium leading-6 text-gray-900">
+                        Use a Preset
+                    </label>
+                </div>
+                {usePreset ? (
+                    <div className="mt-2">
+                        <label htmlFor="preset" className="block text-sm font-medium leading-6 text-gray-900">
+                            Presets
+                        </label>
+                        <select
+                            name="preset"
+                            id="preset"
+                            className="block w-full rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
+                            value={selectedPreset}
+                            onChange={handlePresetChange}
+                        >
+                            <option value="">Select a preset</option>
+                            {presets.map((preset) => (
+                                <option key={preset.preset_id} value={preset.preset_id}>
+                                    {preset.name}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+                ) : (
+                    <div className="mt-2">
+                        <label htmlFor="transcode-options" className="block text-sm font-medium leading-6 text-gray-900">
+                            Transcoding Pipeline
+                        </label>
+                        <textarea
+                            name="transcode-options"
+                            id="transcode-options"
+                            className="block w-full rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
+                            value={pipeline}
+                            onChange={(e) => setPipeline(e.target.value)}
+                            rows={5}
+                            disabled={usePreset}
+                        />
+                    </div>
+                )}
             </div>
             <div className="flex justify-center">
                 {error && <div className="text-red-600 mb-4">{error}</div>}
-
             </div>
             <div className="flex justify-center">
                 <button
