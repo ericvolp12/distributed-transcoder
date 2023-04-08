@@ -1,4 +1,4 @@
-import { ChangeEvent, useState } from 'react';
+import { ChangeEvent, useState, useRef } from 'react';
 import axios, { AxiosProgressEvent } from 'axios';
 
 interface VideoUploadProps {
@@ -11,6 +11,8 @@ const VideoUpload: React.FC<VideoUploadProps> = ({ onUpload }) => {
     const [uploadProgress, setUploadProgress] = useState<number | null>(null);
     const [inputS3Path, setInputS3Path] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
+
+    const fileInputRef = useRef<HTMLInputElement>(null);
 
     const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
         const selectedFile = e.target.files?.[0] ?? null;
@@ -58,26 +60,46 @@ const VideoUpload: React.FC<VideoUploadProps> = ({ onUpload }) => {
     };
 
     return (
-        <div className="text-center">
-            <label className="block text-gray-700 text-sm font-bold mb-2">
-                Select video file:
+        <div>
+            <label htmlFor="file-upload" className="block text-lg font-bold mb-2">
+                Upload Source File
             </label>
-            <input
-                type="file"
-                accept="video/*"
-                onChange={handleFileChange}
-                disabled={uploading}
-            />
-            <button
-                className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded mt-4"
-                onClick={uploadFile}
-                disabled={uploading}
-            >
-                {inputS3Path ? 'Upload Again?' : uploading ? 'Uploading...' : 'Upload'}
-            </button>
+            <div className="mt-2 flex rounded-md shadow-sm">
+                <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="relative flex items-center text-sm bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-l-md focus:outline-none focus:shadow-outline whitespace-nowrap"
+                >
+                    Select File
+                </button>
+                <input
+                    type="file"
+                    id="file-upload"
+                    accept="video/*"
+                    onChange={handleFileChange}
+                    disabled={uploading}
+                    ref={fileInputRef}
+                    className="hidden"
+                />
+                <input
+                    type="text"
+                    value={file?.name ?? ''}
+                    className="block w-full rounded-none border-0 py-1.5 pl-3 text-gray-900 ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
+                    placeholder="No file selected"
+                    disabled
+                />
+                <button
+                    type="button"
+                    onClick={uploadFile}
+                    disabled={uploading}
+                    className={`relative flex items-center text-sm bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-r-md focus:outline-none focus:shadow-outline whitespace-nowrap ${uploading ? 'cursor-wait' : ''}`}
+                >
+                    {inputS3Path ? 'Upload Completed' : uploading ? 'Uploading...' : 'Upload'}
+                </button>
+            </div>
             {error && <p className="text-red-600 mt-4">{error}</p>}
             {uploadProgress !== null && (
-                <div className="mt-4">
+                <div className="mt-4 text-center">
                     <div className="h-2 w-full bg-gray-200">
                         <div
                             className="h-full bg-blue-500"

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 
 interface JobProgressProps {
     jobId: string;
+    setJobStatus: (status: string) => void;
 }
 
 interface JobResultMessage {
@@ -25,7 +26,7 @@ function isProgressMessage(message: JobResultMessage | ProgressMessage): message
     return (message as ProgressMessage).progress !== undefined;
 }
 
-const JobProgress: React.FC<JobProgressProps> = ({ jobId }) => {
+const JobProgress: React.FC<JobProgressProps> = ({ jobId, setJobStatus }) => {
     const [progress, setProgress] = useState<number | null>(null);
     const [error, setError] = useState<string | null>(null);
 
@@ -40,10 +41,12 @@ const JobProgress: React.FC<JobProgressProps> = ({ jobId }) => {
                 const data: JobResultMessage | ProgressMessage = JSON.parse(message.data);
                 if (isJobResultMessage(data) && data.status === "completed") {
                     setProgress(100);
+                    setJobStatus('completed');
                     return;
                 }
                 if (isJobResultMessage(data) && data.status === "failed") {
                     setError(data.error);
+                    setJobStatus('failed');
                     return;
                 }
                 if (isProgressMessage(data)) {
@@ -71,23 +74,25 @@ const JobProgress: React.FC<JobProgressProps> = ({ jobId }) => {
         return null;
     }
     return (
-        <div className="w-full px-4 py-2 bg-white shadow-md">
-            {error && <div className="text-red-600 text-center">{error}</div>}
+        <div className="w-full relative h-6">
+            {error && (
+                <div className="text-red-600 text-center absolute top-0 left-0 w-full h-6 flex items-center justify-center z-10">
+                    {error}
+                </div>
+            )}
             {progress !== null && (
-                <div>
-                    <div className="h-6 w-full bg-gray-200 rounded-lg">
-                        <div
-                            className="h-full bg-green-500 flex items-center justify-center text-white font-semibold rounded-lg"
-                            style={{ width: `${progress}%` }}
-                        >
-                            Job Progress: {progress.toFixed(2)}%
-                        </div>
+                <div className="h-6 w-full bg-gray-200 rounded-lg">
+                    <div
+                        className={`h-full bg-green-500 flex items-center text-sm rounded-lg whitespace-nowrap ${progress < 35 ? 'justify-start pl-2 text-black' : 'justify-center text-white'
+                            } font-semibold`}
+                        style={{ width: `${progress}%` }}
+                    >
+                        Job Progress: {progress.toFixed(2)}%
                     </div>
                 </div>
             )}
         </div>
     );
-
 };
 
 export default JobProgress;

@@ -2,9 +2,10 @@ import { useState } from 'react';
 
 interface DownloadVideoProps {
     outputPath: string;
+    jobStatus: string;
 }
 
-const DownloadVideo: React.FC<DownloadVideoProps> = ({ outputPath }) => {
+const DownloadVideo: React.FC<DownloadVideoProps> = ({ outputPath, jobStatus }) => {
     const [signedUrl, setSignedUrl] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
 
@@ -27,20 +28,20 @@ const DownloadVideo: React.FC<DownloadVideoProps> = ({ outputPath }) => {
     };
 
     return (
-        <div className="text-center mt-8">
-            <h2 className="text-2xl font-bold mb-4">Download Transcoded Video</h2>
+        <div className="text-center">
             {signedUrl ? (
                 <a
                     href={signedUrl}
-                    className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline"
+                    target="_blank"
+                    className="rounded-md bg-indigo-600 px-3.5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
                     download
                 >
                     Download Video
                 </a>
             ) : (
                 <button
-                    className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline"
-                    disabled={loading}
+                    className={`${jobStatus === 'completed' ? '' : 'disabled'} rounded-md bg-indigo-600 px-3.5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600`}
+                    disabled={loading || jobStatus !== 'completed'}
                     onClick={handleClick}
                 >
                     Generate Download Link
