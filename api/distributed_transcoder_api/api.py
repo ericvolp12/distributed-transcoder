@@ -4,7 +4,7 @@ import logging
 import os
 import tempfile
 from dataclasses import asdict
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import boto3
 import pika
@@ -19,17 +19,23 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pika.adapters.blocking_connection import BlockingChannel
 from starlette.websockets import WebSocketDisconnect
+from tortoise.contrib.fastapi import register_tortoise
 
 from .managers import EventManager
-from .models import Job, Preset, init_db
+from .models import Job, Preset, PresetOut
+from .schemas import PresetCreate, PresetUpdate, TranscodingJob
+from .seed import seed_presets
 from .work_queue import JOB_QUEUE_NAME, consume_events, init_channels
-from .schemas import PresetCreate, PresetUpdate, PresetOut, TranscodingJob
 
 # Constants
 AWS_ACCESS_KEY_ID = os.environ["AWS_ACCESS_KEY_ID"]
 AWS_SECRET_ACCESS_KEY = os.environ["AWS_SECRET_ACCESS_KEY"]
 S3_BUCKET_NAME = os.environ["S3_BUCKET_NAME"]
 AWS_S3_ENDPOINT_URL = os.environ["AWS_S3_ENDPOINT_URL"]
+POSTGRES_USER = os.environ["POSTGRES_USER"]
+POSTGRES_PASSWORD = os.environ["POSTGRES_PASSWORD"]
+POSTGRES_DB = os.environ["POSTGRES_DB"]
+POSTGRES_HOST = os.environ["POSTGRES_HOST"]
 
 # Set up logging
 logging.basicConfig(
@@ -66,7 +72,20 @@ s3 = boto3.client(
     endpoint_url=AWS_S3_ENDPOINT_URL,
 )
 
-init_db(app)
+register_tortoise(
+    app,
+    db_url=f"postgres://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}/{POSTGRES_DB}",
+    modules={"models": ["distributed_transcoder_api.models"]},
+    generate_schemas=True,
+    add_exception_handlers=True,
+)
+
+
+@app.on_event("startup")
+async def startup_event():
+    await seed_presets()
+    logger.info("Finished seeding presets")
+
 
 credentials = pika.PlainCredentials("guest", "guest")
 channel, connection = init_channels("rabbitmq", 5672, credentials)
@@ -172,7 +191,7 @@ async def submit_job(job: TranscodingJob):
 
 
 @app.get("/jobs")
-async def list_jobs(skip: int = Query(0, ge=0), limit: int = Query(10, ge=1)):
+async def list_jobs(skip: int = Query(0, ge=0), limit: int = Query(10, ge=1, le=100)):
     jobs = await Job.all().offset(skip).limit(limit)
     return {"jobs": jobs}
 
@@ -184,8 +203,21 @@ async def create_preset(preset: PresetCreate):
 
 
 @app.get("/presets", response_model=List[PresetOut])
-async def list_presets(skip: int = Query(0, ge=0), limit: int = Query(10, ge=1)):
-    presets = await Preset.all().offset(skip).limit(limit)
+async def list_presets(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(10, ge=1, le=100),
+    input_type: Optional[str] = None,
+    output_type: Optional[str] = None,
+):
+    query = Preset.all()
+
+    if input_type:
+        query = query.filter(input_type=input_type)
+
+    if output_type:
+        query = query.filter(output_type=output_type)
+
+    presets = await query.offset(skip).limit(limit)
     return presets
 
 
@@ -237,6 +269,10 @@ async def progress(websocket: WebSocket, job_id: str):
     logging.info(
         f"Client {websocket.client.host}:{websocket.client.port} is now watching job: {job_id}"
     )
+
+    job = await Job.get_or_none(job_id=job_id)
+    if not job:
+        await websocket.send_json({"error": "Job not yet submitted"})
 
     # If the job is already done, send the completion message and close the connection
     if job_id in finished_jobs:

@@ -1,5 +1,3 @@
-import uuid
-from datetime import datetime
 from typing import Optional
 
 from pydantic import BaseModel
@@ -25,16 +23,3 @@ class PresetUpdate(BaseModel):
     input_type: Optional[str] = None
     output_type: Optional[str] = None
     pipeline: Optional[str] = None
-
-
-class PresetOut(BaseModel):
-    preset_id: uuid.UUID
-    name: str
-    input_type: str
-    output_type: str
-    pipeline: str
-    created_at: datetime
-    updated_at: datetime
-
-    class Config:
-        orm_mode = True

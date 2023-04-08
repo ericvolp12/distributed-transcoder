@@ -1,14 +1,6 @@
-import os
-
-from fastapi import FastAPI
-from tortoise import Tortoise, fields, run_async
-from tortoise.contrib.fastapi import register_tortoise
+from tortoise import fields
 from tortoise.models import Model
-
-POSTGRES_USER = os.environ["POSTGRES_USER"]
-POSTGRES_PASSWORD = os.environ["POSTGRES_PASSWORD"]
-POSTGRES_DB = os.environ["POSTGRES_DB"]
-POSTGRES_HOST = os.environ["POSTGRES_HOST"]
+from tortoise.contrib.pydantic import pydantic_model_creator
 
 
 class Job(Model):
@@ -41,11 +33,4 @@ class Preset(Model):
         ordering = ["name"]
 
 
-def init_db(app: FastAPI):
-    register_tortoise(
-        app,
-        db_url=f"postgres://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}/{POSTGRES_DB}",
-        modules={"models": ["distributed_transcoder_api.models"]},
-        generate_schemas=True,
-        add_exception_handlers=True,
-    )
+PresetOut = pydantic_model_creator(Preset, name="PresetOut")
