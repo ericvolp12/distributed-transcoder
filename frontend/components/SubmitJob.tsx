@@ -116,8 +116,8 @@ const SubmitJob: React.FC<SubmitJobProps> = ({
 
   return (
     <div className="">
-      <h2 className="text-2xl font-bold mb-4 text-center">
-        Submit Transcoding Job
+      <h2 className="text-xl font-bold mb-4 text-center">
+        Configure Job Settings
       </h2>
       <div className="mb-4">
         <label

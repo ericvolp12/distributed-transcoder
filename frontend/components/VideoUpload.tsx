@@ -63,7 +63,10 @@ const VideoUpload: React.FC<VideoUploadProps> = ({ onUpload }) => {
 
   return (
     <div>
-      <label htmlFor="file-upload" className="block text-lg font-bold mb-2">
+      <label
+        htmlFor="file-upload"
+        className="block text-xl font-bold mb-4 text-center"
+      >
         Upload Source File
       </label>
       <div className="mt-2 flex rounded-md shadow-sm">

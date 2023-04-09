@@ -30,15 +30,18 @@ const Layout = ({ children, title = "Video Transcoding Service" }: Props) => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-100">
-      <div className="container mx-auto px-4 py-8 w-1/4">
+    <div className="min-h-fit">
+      <div className="container mx-auto px-4 py-8 w-1/4 ">
         <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold">Video Transcoding App</h1>
+          <h1 className="text-4xl font-bold">Submit a New Transcoding Job</h1>
         </div>
-        <div className="mx-auto">
+        <div className="mx-auto ">
           <div className="bg-white p-6 rounded shadow-md h-full mb-8">
-            <label htmlFor="job-id" className="block text-lg font-bold mb-2">
-              Job ID:
+            <label
+              htmlFor="job-id"
+              className="block text-xl font-bold mb-4 text-center"
+            >
+              Assign a Job ID
             </label>
             <div className="mt-2 flex rounded-md shadow-sm">
               <div className="relative flex-grow items-stretch focus-within:z-10">
