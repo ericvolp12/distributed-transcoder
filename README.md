@@ -2,7 +2,16 @@
 
 A distributed video transcoding service using RabbitMQ, GStreamer, and S3-compatible object storage (such as MinIO) with a React frontend.
 
-![Frontend Demo](docs/images/frontend_demo.png)
+### Video Demos
+
+![Job List Demo](docs/images/job_list_demo.gif)
+
+<details>
+<summary>
+New Job Submission
+</summary>
+<img src="docs/images/job_submit_demo.gif" alt="Job Submission">
+</details>
 
 ## Overview
 
