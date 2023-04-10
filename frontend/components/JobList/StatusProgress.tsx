@@ -1,10 +1,10 @@
 import React from "react";
 
-interface StatusProgressProps {
+interface JobStatusProgressProps {
   progress: number | null;
 }
 
-const StatusProgress: React.FC<StatusProgressProps> = ({ progress }) => {
+const JobStatusProgress: React.FC<JobStatusProgressProps> = ({ progress }) => {
   const textColor = progress < 50 ? "text-gray-900" : "text-white";
 
   if (progress === null) {
@@ -27,4 +27,4 @@ const StatusProgress: React.FC<StatusProgressProps> = ({ progress }) => {
   );
 };
 
-export default StatusProgress;
+export default JobStatusProgress;

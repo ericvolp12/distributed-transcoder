@@ -1,4 +1,4 @@
-import JobList from "../components/JobList";
+import JobList from "../components/JobList/JobList";
 
 const IndexPage = () => {
   return (

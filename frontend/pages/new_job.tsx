@@ -1,5 +1,4 @@
-import NewJob from "../components/NewJob";
-import Navbar from "../components/Navbar";
+import NewJob from "../components/JobSubmission/NewJob";
 
 const IndexPage = () => {
   return <NewJob></NewJob>;

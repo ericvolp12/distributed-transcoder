@@ -22,7 +22,7 @@ from starlette.websockets import WebSocketDisconnect
 from tortoise.contrib.fastapi import register_tortoise
 
 from .managers import EventManager
-from .models import Job, Preset, PresetOut
+from .models import Job, Preset, PresetOut, JobOut
 from .schemas import PresetCreate, PresetUpdate, TranscodingJob
 from .seed import seed_presets
 from .work_queue import JOB_QUEUE_NAME, consume_events, init_channels
@@ -194,6 +194,14 @@ async def submit_job(job: TranscodingJob):
 async def list_jobs(skip: int = Query(0, ge=0), limit: int = Query(10, ge=1, le=100)):
     jobs = await Job.all().offset(skip).limit(limit)
     return {"jobs": jobs}
+
+
+@app.get("/jobs/{job_id}", response_model=JobOut)
+async def get_job(job_id: str):
+    job = await Job.get_or_none(job_id=job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job
 
 
 @app.post("/presets", response_model=PresetOut)

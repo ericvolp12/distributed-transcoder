@@ -6,9 +6,9 @@ import {
 } from "@heroicons/react/24/solid";
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import CircularProgress from "./CircularProgress";
-import StatusProgress from "./StatusProgress";
-import { ProgressMessage, isProgressMessage } from "./Messages";
+import CircularProgress from "../CircularProgress";
+import JobStatusProgress from "./StatusProgress";
+import { ProgressMessage, isProgressMessage } from "../Messages";
 
 interface Job {
   job_id: string;
@@ -318,7 +318,7 @@ const JobList = () => {
                       </td>
                       <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
                         {job.state === "in-progress" ? (
-                          <StatusProgress
+                          <JobStatusProgress
                             progress={jobProgress[job.job_id] || 0}
                           />
                         ) : (

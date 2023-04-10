@@ -34,3 +34,4 @@ class Preset(Model):
 
 
 PresetOut = pydantic_model_creator(Preset, name="PresetOut")
+JobOut = pydantic_model_creator(Job, name="JobOut")

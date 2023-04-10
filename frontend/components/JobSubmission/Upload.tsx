@@ -1,15 +1,18 @@
 import { ChangeEvent, useState, useRef } from "react";
 import axios, { AxiosProgressEvent } from "axios";
+import {
+  CloudArrowUpIcon,
+  DocumentCheckIcon,
+} from "@heroicons/react/24/outline";
 
-interface VideoUploadProps {
+import CircularProgress from "../CircularProgress";
+
+interface UploadProps {
   jobId: string;
   onUpload: (inputPath: string) => void;
 }
 
-const VideoUpload: React.FC<VideoUploadProps> = ({
-  onUpload,
-  jobId: jobId,
-}) => {
+const Upload: React.FC<UploadProps> = ({ onUpload, jobId: jobId }) => {
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState<boolean>(false);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
@@ -83,7 +86,7 @@ const VideoUpload: React.FC<VideoUploadProps> = ({
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
-          className="relative flex items-center text-sm bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-l-md focus:outline-none focus:shadow-outline whitespace-nowrap"
+          className="relative -mr-px inline-flex items-center gap-x-1.5 rounded-l-md px-3 py-2 text-sm font-semibold text-gray-900 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 whitespace-nowrap"
         >
           Select File
         </button>
@@ -107,31 +110,30 @@ const VideoUpload: React.FC<VideoUploadProps> = ({
           type="button"
           onClick={uploadFile}
           disabled={uploading}
-          className={`relative flex items-center text-sm bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-r-md focus:outline-none focus:shadow-outline whitespace-nowrap ${
+          className={`relative -ml-px inline-flex items-center gap-x-1.5 rounded-r-md px-3 py-2 text-sm font-semibold text-gray-900 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 ${
             uploading ? "cursor-wait" : ""
           }`}
         >
-          {inputS3Path
-            ? "Upload Completed"
-            : uploading
-            ? "Uploading..."
-            : "Upload"}
+          {inputS3Path ? (
+            <DocumentCheckIcon className="inline-block w-6 h-6" />
+          ) : uploading ? (
+            <CircularProgress
+              progress={uploadProgress}
+              radius={10}
+              strokeWidth={4}
+              heightClass="h-6"
+              widthClass="w-6"
+              innerColor="#6366F1"
+              outerColor="#CBD5E0"
+            />
+          ) : (
+            <CloudArrowUpIcon className="inline-block w-6 h-6" />
+          )}
         </button>
       </div>
       {error && <p className="text-red-600 mt-4">{error}</p>}
-      {uploadProgress !== null && (
-        <div className="mt-4 text-center">
-          <div className="h-2 w-full bg-gray-200">
-            <div
-              className="h-full bg-blue-500"
-              style={{ width: `${uploadProgress}%` }}
-            ></div>
-          </div>
-          <p className="text-sm mt-2">Upload Progress: {uploadProgress}%</p>
-        </div>
-      )}
     </div>
   );
 };
 
-export default VideoUpload;
+export default Upload;

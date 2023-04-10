@@ -1,14 +1,11 @@
 import { useState } from "react";
 
-interface DownloadVideoProps {
+interface DownloadProps {
   outputPath: string;
   jobStatus: string;
 }
 
-const DownloadVideo: React.FC<DownloadVideoProps> = ({
-  outputPath,
-  jobStatus,
-}) => {
+const Download: React.FC<DownloadProps> = ({ outputPath, jobStatus }) => {
   const [signedUrl, setSignedUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const handleClick = async () => {
@@ -57,4 +54,4 @@ const DownloadVideo: React.FC<DownloadVideoProps> = ({
   );
 };
 
-export default DownloadVideo;
+export default Download;

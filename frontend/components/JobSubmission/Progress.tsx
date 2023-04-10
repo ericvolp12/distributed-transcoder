@@ -6,14 +6,14 @@ import {
   isErrorMessage,
   isJobResultMessage,
   isProgressMessage,
-} from "./Messages";
+} from "../Messages";
 
-interface JobProgressProps {
+interface ProgressProps {
   jobId: string;
   setJobStatus: (status: string) => void;
 }
 
-const JobProgress: React.FC<JobProgressProps> = ({ jobId, setJobStatus }) => {
+const Progress: React.FC<ProgressProps> = ({ jobId, setJobStatus }) => {
   const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -99,4 +99,4 @@ const JobProgress: React.FC<JobProgressProps> = ({ jobId, setJobStatus }) => {
   );
 };
 
-export default JobProgress;
+export default Progress;
