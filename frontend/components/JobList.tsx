@@ -61,7 +61,7 @@ const JobList = () => {
       }));
 
       const jobsWithPresetNames = await Promise.all(
-        temp_jobs.map(async (job) => {
+        temp_jobs.map(async (job: Job) => {
           try {
             const presetName = await fetchPresetData(job.preset_id);
             return { ...job, preset_name: presetName };

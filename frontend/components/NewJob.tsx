@@ -65,7 +65,7 @@ const Layout = ({ children, title = "Video Transcoding Service" }: Props) => {
           </div>
 
           <div className="bg-white p-6 rounded shadow-md h-full mb-8">
-            <VideoUpload onUpload={handleUpload} />
+            <VideoUpload onUpload={handleUpload} jobId={jobId} />
           </div>
           <div className="bg-white p-6 rounded shadow-md h-full mb-8">
             <SubmitJob

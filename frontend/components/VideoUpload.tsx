@@ -2,10 +2,14 @@ import { ChangeEvent, useState, useRef } from "react";
 import axios, { AxiosProgressEvent } from "axios";
 
 interface VideoUploadProps {
+  jobId: string;
   onUpload: (inputPath: string) => void;
 }
 
-const VideoUpload: React.FC<VideoUploadProps> = ({ onUpload }) => {
+const VideoUpload: React.FC<VideoUploadProps> = ({
+  onUpload,
+  jobId: jobId,
+}) => {
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState<boolean>(false);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
@@ -16,7 +20,12 @@ const VideoUpload: React.FC<VideoUploadProps> = ({ onUpload }) => {
 
   const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0] ?? null;
-    setFile(selectedFile);
+    const ext = selectedFile?.name.split(".").pop();
+    const modifiedFile = new File([selectedFile], `${jobId}_in.${ext}`, {
+      type: selectedFile?.type,
+      lastModified: selectedFile?.lastModified,
+    });
+    setFile(modifiedFile);
     setUploadProgress(null);
   };
 
@@ -30,6 +39,7 @@ const VideoUpload: React.FC<VideoUploadProps> = ({ onUpload }) => {
     setError(null);
 
     const formData = new FormData();
+
     formData.append("file", file);
 
     try {
@@ -80,7 +90,7 @@ const VideoUpload: React.FC<VideoUploadProps> = ({ onUpload }) => {
         <input
           type="file"
           id="file-upload"
-          accept="video/*"
+          accept="video/*,.mkv"
           onChange={handleFileChange}
           disabled={uploading}
           ref={fileInputRef}

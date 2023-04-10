@@ -54,10 +54,10 @@ const SubmitJob: React.FC<SubmitJobProps> = ({
     const preset = presets.find((p) => p.preset_id === presetId);
     setSelectedPreset(presetId);
     if (presetId) {
-      const outPath = `${inputPath.substring(
-        0,
-        inputPath.lastIndexOf(".")
-      )}_out.${preset?.output_type}`;
+      const outPath = inputPath.replace(
+        `_in.${preset?.input_type}`,
+        `_out.${preset?.output_type}`
+      );
       setOutputPath(outPath);
       setPipeline("");
     }

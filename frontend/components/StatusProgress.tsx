@@ -19,7 +19,9 @@ const StatusProgress: React.FC<StatusProgressProps> = ({ progress }) => {
       <div
         className={`absolute top-0 left-0 w-full h-full flex items-center justify-center ${textColor}`}
       >
-        <span className="text-xs">{progress.toFixed(2)}%</span>
+        <span className="text-xs">
+          {progress >= 100 ? "completed" : `${progress.toFixed(2)}%`}
+        </span>
       </div>
     </div>
   );
