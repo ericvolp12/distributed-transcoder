@@ -19,7 +19,6 @@ const Submit: React.FC<SubmitProps> = ({ jobId, inputPath, onJobSubmit }) => {
   const [pipeline, setPipeline] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
   const [presets, setPresets] = useState([]);
   const [selectedPreset, setSelectedPreset] = useState(null);
   const [usePreset, setUsePreset] = useState(true);
@@ -86,8 +85,6 @@ const Submit: React.FC<SubmitProps> = ({ jobId, inputPath, onJobSubmit }) => {
       jobData = { ...jobData, pipeline };
     }
 
-    onJobSubmit(jobId, outputPath);
-
     try {
       const response = await fetch("http://localhost:8000/submit_job", {
         method: "POST",
@@ -99,7 +96,14 @@ const Submit: React.FC<SubmitProps> = ({ jobId, inputPath, onJobSubmit }) => {
         const message = await response.text();
         setError(message);
       } else {
-        setSuccess("Job submitted successfully");
+        // Reset state variables
+        setOutputPath("");
+        setPipeline("");
+        setSubmitting(false);
+        setError(null);
+        setSelectedPreset(null);
+        setUsePreset(true);
+        onJobSubmit(jobId, outputPath);
       }
     } catch (err) {
       setError(err.message);
@@ -110,9 +114,6 @@ const Submit: React.FC<SubmitProps> = ({ jobId, inputPath, onJobSubmit }) => {
 
   return (
     <div className="">
-      <h2 className="text-xl font-bold mb-4 text-center">
-        Configure Job Settings
-      </h2>
       <div className="mb-4">
         <div className="flex items-center">
           <input
@@ -190,19 +191,18 @@ const Submit: React.FC<SubmitProps> = ({ jobId, inputPath, onJobSubmit }) => {
       </div>
       <div className="flex justify-center">
         {error && <div className="text-red-600 mb-4">{error}</div>}
-        {success && <div className="text-green-600 mb-4">{success}</div>}
       </div>
-      <div className="flex justify-center">
+      <div className="flex justify-end">
         <button
           className={
             "rounded-md px-3.5 py-2.5 text-sm font-semibold text-white shadow-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2" +
             `${
-              submitting || success !== null
+              submitting
                 ? " bg-gray-400"
                 : " bg-indigo-600 hover:bg-indigo-700 focus:ring-indigo-500"
             }`
           }
-          disabled={submitting || success !== null}
+          disabled={submitting}
           onClick={handleSubmit}
         >
           Submit Job

@@ -76,12 +76,6 @@ const Upload: React.FC<UploadProps> = ({ onUpload, jobId: jobId }) => {
 
   return (
     <div>
-      <label
-        htmlFor="file-upload"
-        className="block text-xl font-bold mb-4 text-center"
-      >
-        Upload Source File
-      </label>
       <div className="mt-2 flex rounded-md shadow-sm">
         <button
           type="button"

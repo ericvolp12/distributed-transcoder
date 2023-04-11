@@ -16,6 +16,12 @@ async def seed_presets():
             "pipeline": "filesrc location={{input_file}} ! qtdemux name=d mp4mux name=mux ! filesink location={{output_file}} d.audio_0 ! queue max-size-buffers=0 max-size-bytes=0 max-size-time=0 ! decodebin ! audioconvert ! avenc_aac ! mux.audio_0 d.video_0 ! queue max-size-buffers=0 max-size-bytes=0 max-size-time=0 ! decodebin ! videoscale ! video/x-raw,width=1280, height=720 ! x265enc bitrate=1024 ! {{progress}} ! h265parse ! mux.video_0",
         },
         {
+            "name": "Scale to 720p x264 (1 mbit) mp4->mp4",
+            "input_type": "mp4",
+            "output_type": "mp4",
+            "pipeline": "filesrc location={{input_file}} ! qtdemux name=d mp4mux name=mux ! filesink location={{output_file}} d.audio_0 ! queue max-size-buffers=0 max-size-bytes=0 max-size-time=0 ! decodebin ! audioconvert ! avenc_aac ! mux.audio_0 d.video_0 ! queue max-size-buffers=0 max-size-bytes=0 max-size-time=0 ! decodebin ! videoscale ! video/x-raw,width=1280, height=720 ! x264enc bitrate=1536 ! {{progress}} ! h264parse ! mux.video_0",
+        },
+        {
             "name": "Scale to 480p x265 (756 kbit) mp4->mp4",
             "input_type": "mp4",
             "output_type": "mp4",

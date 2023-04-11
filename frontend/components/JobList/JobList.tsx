@@ -4,11 +4,11 @@ import {
   ExclamationTriangleIcon,
   XMarkIcon,
 } from "@heroicons/react/24/solid";
-import Link from "next/link";
 import { useEffect, useState } from "react";
 import CircularProgress from "../CircularProgress";
 import JobStatusProgress from "./StatusProgress";
 import { ProgressMessage, isProgressMessage } from "../Messages";
+import NewJob from "../JobSubmission/NewJob";
 
 interface Job {
   job_id: string;
@@ -30,6 +30,7 @@ interface Alert {
 
 const JobList = () => {
   const [jobs, setJobs] = useState<Job[]>([]);
+  const [jobRefreshQueued, setJobRefreshQueued] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loadingJob, setLoadingJob] = useState<string | null>(null);
   const [progress, setProgress] = useState<number | null>(null);
@@ -37,6 +38,8 @@ const JobList = () => {
   const [jobProgress, setJobProgress] = useState<{ [jobId: string]: number }>(
     {}
   );
+  const [isFormVisible, setIsFormVisible] = useState(false);
+  const [connectedSockets, setConnectedSockets] = useState<string[]>([]);
 
   useEffect(() => {
     fetchJobs();
@@ -47,8 +50,23 @@ const JobList = () => {
       if (job.state === "in-progress") {
         handleJobProgress(job.job_id);
       }
+      if (job.state === "queued") {
+        // Trigger a refresh of jobs in 10 seconds if one isn't already pending
+        if (!jobRefreshQueued) {
+          setJobRefreshQueued(true);
+          setTimeout(() => {
+            fetchJobs();
+            setJobRefreshQueued(false);
+          }, 10000);
+        }
+      }
     });
   }, [jobs]);
+
+  // Update this function to toggle the job submission form
+  const handleFormToggle = () => {
+    setIsFormVisible(!isFormVisible);
+  };
 
   const fetchJobs = async () => {
     try {
@@ -78,7 +96,11 @@ const JobList = () => {
   };
 
   const handleJobProgress = (jobId: string) => {
+    if (connectedSockets.includes(jobId)) {
+      return;
+    }
     const ws = new WebSocket(`ws://localhost:8000/progress/${jobId}`);
+    setConnectedSockets((prevSockets) => [...prevSockets, jobId]);
     ws.onmessage = (message) => {
       const data: ProgressMessage = JSON.parse(message.data);
 
@@ -94,9 +116,15 @@ const JobList = () => {
     };
     ws.onclose = () => {
       console.log("Connection to Progress WebSocket closed");
+      setConnectedSockets((prevSockets) =>
+        prevSockets.filter((socket) => socket !== jobId)
+      );
     };
     return () => {
       ws.close();
+      setConnectedSockets((prevSockets) =>
+        prevSockets.filter((socket) => socket !== jobId)
+      );
     };
   };
 
@@ -194,13 +222,13 @@ const JobList = () => {
           </p>
         </div>
         <div className="mt-4 sm:ml-16 sm:mt-0 sm:flex-none">
-          <Link
+          <button
             type="button"
-            href="/new_job"
+            onClick={handleFormToggle}
             className="block rounded-md bg-indigo-600 px-3 py-2 text-center text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
           >
             Submit Job
-          </Link>
+          </button>
         </div>
       </div>
       <div className="mt-8 flow-root">
@@ -376,6 +404,15 @@ const JobList = () => {
             </div>
           </div>
         </div>
+        <NewJob
+          open={isFormVisible}
+          setOpen={(state: boolean) => {
+            if (!state) {
+              fetchJobs();
+            }
+            setIsFormVisible(state);
+          }}
+        />
       </div>
     </div>
   );
