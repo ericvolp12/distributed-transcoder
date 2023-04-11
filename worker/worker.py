@@ -5,6 +5,7 @@ import tempfile
 import time
 from dataclasses import asdict
 from typing import Tuple
+import threading
 
 import boto3
 import gi
@@ -19,6 +20,7 @@ from errors import (
     FailedMidTranscode,
     FailedToParsePipeline,
     FailedToPlay,
+    PipelineTimeout,
     TranscodeException,
 )
 from pika.channel import Channel
@@ -38,6 +40,8 @@ AWS_ACCESS_KEY_ID = os.environ["AWS_ACCESS_KEY_ID"]
 AWS_SECRET_ACCESS_KEY = os.environ["AWS_SECRET_ACCESS_KEY"]
 S3_BUCKET_NAME = os.environ["S3_BUCKET_NAME"]
 AWS_S3_ENDPOINT_URL = os.environ["AWS_S3_ENDPOINT_URL"]
+TIMEOUT_SECONDS = 60  # 1 minute
+
 
 # Set up logging
 logging.basicConfig(
@@ -78,10 +82,13 @@ def on_gst_message(
     """
     loop, pipeline, ch, job_id = data
     message_type = message.type
+    global last_progress_time
+    global transcoding_error
     if message_type == Gst.MessageType.ERROR:
         error, debug = message.parse_error()
         logger.error("Error received: %s" % error)
         logger.error("Debug info: %s" % debug)
+        transcoding_error = f"Error received from Pipeline Execution: {error}"
         loop.quit()
     elif message_type == Gst.MessageType.EOS:
         logger.info("End of stream")
@@ -95,7 +102,7 @@ def on_gst_message(
             )
     elif message_type == Gst.MessageType.DURATION_CHANGED:
         pass
-    elif message_type == Gst.MessageType.ELEMENT:
+    if message_type == Gst.MessageType.ELEMENT:
         structure = message.get_structure()
         if structure and structure.get_name() == "progress":
             percent: float = structure.get_double("percent-double")[1]
@@ -105,10 +112,28 @@ def on_gst_message(
                 routing_key=PROGRESS_QUEUE_NAME,
                 body=json.dumps(asdict(JobProgressMessage(job_id, round(percent, 4)))),
             )
+            last_progress_time = time.time()
     else:
         logger.debug("Unexpected message: %s" % message_type)
 
     return True
+
+
+def check_timeout(
+    loop: GLib.MainLoop, pipeline: Gst.Pipeline, ch: Channel, job_id: str
+):
+    global last_progress_time
+    global transcoding_error
+    while True:
+        if time.time() - last_progress_time > TIMEOUT_SECONDS:
+            error_msg = f"Pipeline failed to progress after {TIMEOUT_SECONDS} seconds"
+            error_type = "pipeline_timeout"
+            transcoding_error = (error_type, error_msg)
+            logger.error(error_msg)
+            loop.quit()
+            pipeline.set_state(Gst.State.NULL)
+            break
+        time.sleep(1)
 
 
 def transcode(
@@ -148,6 +173,18 @@ def transcode(
     bus.add_signal_watch()
     bus.connect("message", on_gst_message, (loop, pipeline, ch, job_id))
 
+    # Initialize global variables for mid-transcode error handling
+    global last_progress_time
+    last_progress_time = time.time()
+
+    global transcoding_error
+    transcoding_error = (None, None)
+
+    timeout_checker = threading.Thread(
+        target=check_timeout, args=(loop, pipeline, ch, job_id)
+    )
+    timeout_checker.start()
+
     # Set the pipeline to the playing state
     ret = pipeline.set_state(Gst.State.PLAYING)
     if ret == Gst.StateChangeReturn.FAILURE:
@@ -162,6 +199,12 @@ def transcode(
         raise FailedMidTranscode(e)
     finally:
         pipeline.set_state(Gst.State.NULL)
+    if transcoding_error:
+        error_type, error_msg = transcoding_error
+        if error_type == "pipeline_timeout":
+            raise PipelineTimeout(error_msg)
+        else:
+            raise FailedMidTranscode(error_msg)
 
     return output_file
 

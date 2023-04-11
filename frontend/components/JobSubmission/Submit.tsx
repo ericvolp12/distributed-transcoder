@@ -65,6 +65,7 @@ const Submit: React.FC<SubmitProps> = ({ jobId, inputPath, onJobSubmit }) => {
   };
 
   const handleSubmit = async (e: MouseEvent) => {
+    e.preventDefault();
     if (!inputPath || !outputPath || !jobId || (!pipeline && !selectedPreset)) {
       setError("All fields are required");
       return;
@@ -97,13 +98,14 @@ const Submit: React.FC<SubmitProps> = ({ jobId, inputPath, onJobSubmit }) => {
         setError(message);
       } else {
         // Reset state variables
+        const tempOutputPath = outputPath;
         setOutputPath("");
         setPipeline("");
         setSubmitting(false);
         setError(null);
         setSelectedPreset(null);
         setUsePreset(true);
-        onJobSubmit(jobId, outputPath);
+        onJobSubmit(jobId, tempOutputPath);
       }
     } catch (err) {
       setError(err.message);

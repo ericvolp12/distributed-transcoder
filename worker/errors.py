@@ -23,3 +23,10 @@ class FailedMidTranscode(TranscodeException):
 
     def __init__(self, *args):
         super().__init__("mid_transcode", *args)
+
+
+class PipelineTimeout(TranscodeException):
+    "Raised when the pipeline fails to progress after starting transcode."
+
+    def __init__(self, *args):
+        super().__init__("pipeline_timeout", *args)

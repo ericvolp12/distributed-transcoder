@@ -9,16 +9,20 @@ import CircularProgress from "../CircularProgress";
 import JobStatusProgress from "./StatusProgress";
 import { ProgressMessage, isProgressMessage } from "../Messages";
 import NewJob from "../JobSubmission/NewJob";
+import "react-tooltip/dist/react-tooltip.css";
+import { Tooltip } from "react-tooltip";
 
 interface Job {
-  job_id: string;
+  created_at: Date;
+  error_type?: string;
+  error?: string;
   input_s3_path: string;
+  job_id: string;
   output_s3_path: string;
-  state: string;
+  pipeline?: string;
   preset_id?: string;
   preset_name?: string;
-  pipeline?: string;
-  created_at: Date;
+  state: string;
   updated_at: Date;
 }
 
@@ -80,6 +84,7 @@ const JobList = () => {
 
       const jobsWithPresetNames = await Promise.all(
         temp_jobs.map(async (job: Job) => {
+          if (!job.preset_id) return { ...job, preset_name: "Custom Pipeline" };
           try {
             const presetName = await fetchPresetData(job.preset_id);
             return { ...job, preset_name: presetName };
@@ -356,6 +361,20 @@ const JobList = () => {
                           <JobStatusProgress
                             progress={jobProgress[job.job_id] || 0}
                           />
+                        ) : job.error ? (
+                          <>
+                            <div
+                              data-tooltip-id={`error-tooltip-${job.job_id}`}
+                              data-tooltip-content={`(${job.error_type}): ${job.error}`}
+                              data-tooltip-place="left"
+                            >
+                              {job.state}
+                            </div>
+                            <Tooltip
+                              id={`error-tooltip-${job.job_id}`}
+                              className="absolute z-10 invisible inline-block px-3 py-2 text-sm font-medium text-white bg-gray-900 rounded-lg shadow-sm opacity-0 tooltip dark:bg-gray-700 whitespace-break-spaces max-w-xs"
+                            />
+                          </>
                         ) : (
                           job.state
                         )}
