@@ -54,6 +54,12 @@ const NewJob = ({ setOpen, open }) => {
       autoDismiss: true,
     });
     setTimeout(() => {
+      // Clear the state
+      setJobId("");
+      setProvisionalJobID("");
+      setOutputPath("");
+      setInputPath("");
+      setSubmitted(false);
       setOpen(false);
     }, 5000);
   };

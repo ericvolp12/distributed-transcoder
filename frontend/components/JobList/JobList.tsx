@@ -109,6 +109,13 @@ const JobList = () => {
           ...prevProgress,
           [jobId]: data.progress,
         }));
+        if (data.progress >= 100) {
+          setJobProgress((prevProgress) => {
+            const { [jobId]: _, ...rest } = prevProgress;
+            return rest;
+          });
+          fetchJobs();
+        }
       }
     };
     ws.onerror = (err) => {

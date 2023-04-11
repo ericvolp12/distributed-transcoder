@@ -41,17 +41,6 @@ export default function Navbar() {
                   >
                     Jobs
                   </Link>
-                  <Link
-                    href="/new_job"
-                    className={
-                      "inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium" +
-                      (router.pathname === "/new_job"
-                        ? " border-indigo-500 text-gray-900"
-                        : " border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700")
-                    }
-                  >
-                    Submit Job
-                  </Link>
                 </div>
               </div>
             </div>
