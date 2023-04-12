@@ -8,8 +8,8 @@ from pika.adapters.blocking_connection import BlockingChannel, BlockingConnectio
 
 # Define constants for queues
 JOB_QUEUE_NAME = "transcoding_jobs"
-PROGRESS_QUEUE_NAME = "transcoding_progress"
-RESULTS_QUEUE_NAME = "transcoding_results"
+PROGRESS_QUEUE_NAME = "transcoding_progress.*"
+RESULTS_QUEUE_NAME = "transcoding_results.*"
 
 
 def connect_rabbitmq(
@@ -61,10 +61,28 @@ def init_channels(
 
     channel = connection.channel()
 
-    # Initialize RabbitMQ Queues for each type of message stream
+    # Initialize a standard queue for jobs
     channel.queue_declare(queue=JOB_QUEUE_NAME)
+
+    # Initialize a topic exchange for progress logs
+    channel.exchange_declare(exchange="progress_logs", exchange_type="topic")
+    # Initialize a queue for progress logs
     channel.queue_declare(queue=PROGRESS_QUEUE_NAME)
+    channel.queue_bind(
+        exchange="progress_logs",
+        queue=PROGRESS_QUEUE_NAME,
+        routing_key=PROGRESS_QUEUE_NAME,
+    )
+
+    # Initialize a topic exchange for results
+    channel.exchange_declare(exchange="results_logs", exchange_type="topic")
+    # Initialize a queue for results
     channel.queue_declare(queue=RESULTS_QUEUE_NAME)
+    channel.queue_bind(
+        exchange="results_logs",
+        queue=RESULTS_QUEUE_NAME,
+        routing_key=RESULTS_QUEUE_NAME,
+    )
 
     return (channel, connection)
 

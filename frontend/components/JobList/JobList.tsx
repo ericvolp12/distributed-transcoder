@@ -4,7 +4,7 @@ import {
   ExclamationTriangleIcon,
   XMarkIcon,
 } from "@heroicons/react/24/solid";
-import { useEffect, useState } from "react";
+import { SetStateAction, useEffect, useState } from "react";
 import CircularProgress from "../CircularProgress";
 import JobStatusProgress from "./StatusProgress";
 import { ProgressMessage, isProgressMessage } from "../Messages";
@@ -32,6 +32,19 @@ interface Alert {
   autoDismiss?: boolean;
 }
 
+const Spinner = () => {
+  return (
+    <div
+      className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-solid border-current border-r-transparent align-[-0.125em] text-secondary motion-reduce:animate-[spin_1.5s_linear_infinite]"
+      role="status"
+    >
+      <span className="!absolute !-m-px !h-px !w-px !overflow-hidden !whitespace-nowrap !border-0 !p-0 ![clip:rect(0,0,0,0)]">
+        Loading...
+      </span>
+    </div>
+  );
+};
+
 const JobList = () => {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [jobRefreshQueued, setJobRefreshQueued] = useState(false);
@@ -44,10 +57,14 @@ const JobList = () => {
   );
   const [isFormVisible, setIsFormVisible] = useState(false);
   const [connectedSockets, setConnectedSockets] = useState<string[]>([]);
+  const [pageSize, setPageSize] = useState(10);
+  const [currentPage, setCurrentPage] = useState(1);
+  // Add a new state variable to track whether jobs are loading or not
+  const [jobsLoading, setJobsLoading] = useState(false);
 
   useEffect(() => {
     fetchJobs();
-  }, []);
+  }, [pageSize, currentPage]);
 
   useEffect(() => {
     jobs.forEach((job) => {
@@ -72,9 +89,24 @@ const JobList = () => {
     setIsFormVisible(!isFormVisible);
   };
 
-  const fetchJobs = async () => {
+  const fetchJobsWithPagination = async (skip: number, limit: number) => {
+    setJobsLoading(true);
     try {
-      const response = await fetch("http://localhost:8000/jobs");
+      const response = await fetch(
+        `http://localhost:8000/jobs?skip=${skip}&limit=${limit}`
+      );
+
+      if (response.status === 404) {
+        setAlert({
+          type: "error",
+          message: "No jobs found",
+          autoDismiss: true,
+        });
+        if (currentPage > 1) {
+          setCurrentPage(currentPage - 1);
+        }
+      }
+
       const data = await response.json();
       let temp_jobs = data.jobs.map((job) => ({
         ...job,
@@ -97,7 +129,24 @@ const JobList = () => {
       setJobs(jobsWithPresetNames);
     } catch (error) {
       console.error("Error fetching jobs:", error);
+    } finally {
+      setJobsLoading(false);
     }
+  };
+
+  const fetchJobs = async () => {
+    await fetchJobsWithPagination((currentPage - 1) * pageSize, pageSize);
+  };
+
+  const handlePageSizeChange = (e) => {
+    setPageSize(Number(e.target.value));
+    setCurrentPage(1);
+    fetchJobs();
+  };
+
+  const handlePageChange = (newPage: number) => {
+    setCurrentPage(newPage);
+    fetchJobs();
   };
 
   const handleJobProgress = (jobId: string) => {
@@ -308,7 +357,7 @@ const JobList = () => {
               ></div>
             )}
 
-            <div className="overflow-hidden shadow ring-1 ring-black ring-opacity-5 sm:rounded-lg">
+            <div className="overflow-hidden shadow ring-1 ring-black ring-opacity-5 sm:rounded-lg sm:rounded-b-none">
               <table className="min-w-full divide-y divide-gray-300">
                 <thead className="bg-gray-50">
                   <tr>
@@ -430,6 +479,52 @@ const JobList = () => {
             </div>
           </div>
         </div>
+        <div className="flex items-center justify-between border-t shadow ring-1 ring-black ring-opacity-5 border-gray-200 bg-gray-50 px-4 py-3 sm:px-6 sm:rounded-b-lg">
+          <div className="flex flex-1 sm:block">
+            <label
+              htmlFor="page-size"
+              className="mr-2 text-sm font-semibold text-gray-700"
+            >
+              Items per page:
+            </label>
+            <select
+              id="page-size"
+              value={pageSize}
+              onChange={handlePageSizeChange}
+              className="rounded-md border-gray-300 text-sm"
+            >
+              <option value="10">10</option>
+              <option value="25">25</option>
+              <option value="50">50</option>
+            </select>
+          </div>
+          <div className="flex flex-1 justify-center">
+            <p className="text-sm text-gray-700">
+              Page <span className="font-medium">{currentPage}</span>
+            </p>
+          </div>
+          <div className="flex flex-1 justify-between sm:justify-end">
+            {jobsLoading && (
+              <div className="px-3 py-2 text-sm font-semibold">
+                <Spinner />
+              </div>
+            )}
+            <button
+              onClick={() => handlePageChange(currentPage - 1)}
+              disabled={currentPage === 1}
+              className="relative inline-flex items-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 focus-visible:outline-offset-0"
+            >
+              Previous
+            </button>
+            <button
+              onClick={() => handlePageChange(currentPage + 1)}
+              className="relative ml-3 inline-flex items-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 focus-visible:outline-offset-0"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+
         <NewJob
           open={isFormVisible}
           setOpen={(state: boolean) => {

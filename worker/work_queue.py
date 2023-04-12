@@ -5,11 +5,6 @@ from typing import Tuple
 import pika
 from pika.adapters.blocking_connection import BlockingChannel, BlockingConnection
 
-# Define constants for queues
-JOB_QUEUE_NAME = "transcoding_jobs"
-PROGRESS_QUEUE_NAME = "transcoding_progress"
-RESULTS_QUEUE_NAME = "transcoding_results"
-
 
 def connect_rabbitmq(
     host: str,
@@ -49,6 +44,9 @@ def init_channels(
     rabbitmq_host: str,
     rabbitmq_port: int,
     credentials: pika.PlainCredentials,
+    job_queue_name: str,
+    progress_queue_name: str,
+    results_queue_name: str,
 ) -> Tuple[BlockingChannel, BlockingConnection]:
     """
     Initialize the channels for the worker.
@@ -60,9 +58,23 @@ def init_channels(
 
     channel = connection.channel()
 
-    # Initialize RabbitMQ Queues for each type of message stream
-    channel.queue_declare(queue=JOB_QUEUE_NAME)
-    channel.queue_declare(queue=PROGRESS_QUEUE_NAME)
-    channel.queue_declare(queue=RESULTS_QUEUE_NAME)
+    # Initialize a standard queue for jobs
+    channel.queue_declare(queue=job_queue_name)
+
+    # Initialize a topic exchange for progress logs
+    channel.exchange_declare(exchange="progress_logs", exchange_type="topic")
+    # Initialize a queue for progress logs
+    channel.queue_declare(queue=progress_queue_name)
+    channel.queue_bind(
+        exchange="progress_logs", queue=progress_queue_name, routing_key="progress"
+    )
+
+    # Initialize a topic exchange for results
+    channel.exchange_declare(exchange="results_logs", exchange_type="topic")
+    # Initialize a queue for results
+    channel.queue_declare(queue=results_queue_name)
+    channel.queue_bind(
+        exchange="results_logs", queue=results_queue_name, routing_key="results"
+    )
 
     return (channel, connection)

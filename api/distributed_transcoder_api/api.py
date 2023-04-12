@@ -193,6 +193,8 @@ async def submit_job(job: TranscodingJob):
 @app.get("/jobs")
 async def list_jobs(skip: int = Query(0, ge=0), limit: int = Query(10, ge=1, le=100)):
     jobs = await Job.all().offset(skip).limit(limit)
+    if len(jobs) == 0:
+        raise HTTPException(status_code=404, detail="No jobs found")
     return {"jobs": jobs}
 
 
@@ -226,6 +228,9 @@ async def list_presets(
         query = query.filter(output_type=output_type)
 
     presets = await query.offset(skip).limit(limit)
+
+    if len(presets) == 0:
+        raise HTTPException(status_code=404, detail="No presets found")
     return presets
 
 

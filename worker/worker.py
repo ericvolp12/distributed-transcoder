@@ -1,11 +1,13 @@
 import json
 import logging
 import os
+import random
+import string
 import tempfile
+import threading
 import time
 from dataclasses import asdict
 from typing import Tuple
-import threading
 
 import boto3
 import gi
@@ -25,12 +27,7 @@ from errors import (
 )
 from pika.channel import Channel
 from pika.spec import Basic, BasicProperties
-from work_queue import (
-    JOB_QUEUE_NAME,
-    PROGRESS_QUEUE_NAME,
-    RESULTS_QUEUE_NAME,
-    init_channels,
-)
+from work_queue import init_channels
 
 gi.require_version("Gst", "1.0")
 from gi.repository import GLib, Gst
@@ -43,10 +40,18 @@ AWS_S3_ENDPOINT_URL = os.environ["AWS_S3_ENDPOINT_URL"]
 TIMEOUT_SECONDS = 60  # 1 minute
 
 
+# Generate a random 5-character worker ID
+worker_id = "".join(random.choices(string.ascii_lowercase + string.digits, k=5))
+
+# Define constants for queues
+JOB_QUEUE_NAME = f"transcoding_jobs"
+PROGRESS_QUEUE_NAME = f"transcoding_progress.{worker_id}"
+RESULTS_QUEUE_NAME = f"transcoding_results.{worker_id}"
+
 # Set up logging
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s (%(name)s) [%(levelname)s]: %(message)s",
+    format=f"%(asctime)s |{worker_id}| (%(name)s) [%(levelname)s]: %(message)s",
     handlers=[logging.StreamHandler()],
 )
 logger = logging.getLogger(__name__)
@@ -108,7 +113,7 @@ def on_gst_message(
             percent: float = structure.get_double("percent-double")[1]
             logger.info("Progress: {:.1f}%".format(percent))
             ch.basic_publish(
-                exchange="",
+                exchange="progress_logs",
                 routing_key=PROGRESS_QUEUE_NAME,
                 body=json.dumps(asdict(JobProgressMessage(job_id, round(percent, 4)))),
             )
@@ -199,7 +204,7 @@ def transcode(
         raise FailedMidTranscode(e)
     finally:
         pipeline.set_state(Gst.State.NULL)
-    if transcoding_error:
+    if transcoding_error[0] is not None:
         error_type, error_msg = transcoding_error
         if error_type == "pipeline_timeout":
             raise PipelineTimeout(error_msg)
@@ -230,7 +235,7 @@ def send_transcode_result(
     error_type: str = None,
 ):
     ch.basic_publish(
-        exchange="",
+        exchange="results_logs",
         routing_key=RESULTS_QUEUE_NAME,
         body=json.dumps(
             asdict(
@@ -277,7 +282,7 @@ def process_workqueue_message(
         except ClientError as e:
             logger.error(f"Unable to download input chunk: {e}")
             ch.basic_publish(
-                exchange="",
+                exchange="results_logs",
                 routing_key=RESULTS_QUEUE_NAME,
                 body=json.dumps(
                     asdict(
@@ -353,7 +358,14 @@ def main():
     rabbitmq_port = 5672
 
     try:
-        channel, connection = init_channels(rabbitmq_host, rabbitmq_port, credentials)
+        channel, connection = init_channels(
+            rabbitmq_host,
+            rabbitmq_port,
+            credentials,
+            JOB_QUEUE_NAME,
+            RESULTS_QUEUE_NAME,
+            PROGRESS_QUEUE_NAME,
+        )
         logger.info(f"Connected to RabbitMQ on {rabbitmq_host}:{rabbitmq_port}")
     except Exception:
         logger.error(
@@ -364,6 +376,7 @@ def main():
     channel.basic_qos(prefetch_count=1)
     channel.basic_consume(
         queue=JOB_QUEUE_NAME,
+        consumer_tag="worker-{}".format(worker_id),
         on_message_callback=lambda ch, method, properties, body: process_workqueue_message(
             ch, method, properties, body
         ),

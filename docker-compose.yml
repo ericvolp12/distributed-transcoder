@@ -58,6 +58,27 @@ services:
     networks:
       - transcoding_net
 
+  worker_2:
+    build:
+      context: worker/
+      dockerfile: Dockerfile
+    container_name: worker_2
+    environment:
+      AWS_ACCESS_KEY_ID: minio
+      AWS_SECRET_ACCESS_KEY: minio123
+      S3_BUCKET_NAME: transcode
+      AWS_S3_ENDPOINT_URL: http://minio:9000
+      GST_DEBUG: 1
+      POSTGRES_USER: transcoder
+      POSTGRES_PASSWORD: OW14F15rBHRLivihLral
+      POSTGRES_DB: transcoding_jobs
+      POSTGRES_HOST: postgres
+    depends_on:
+      - rabbitmq
+      - minio
+    networks:
+      - transcoding_net
+
   api:
     build:
       context: api/
