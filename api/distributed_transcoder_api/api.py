@@ -19,10 +19,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pika.adapters.blocking_connection import BlockingChannel
 from starlette.websockets import WebSocketDisconnect
+from tortoise import Tortoise
 from tortoise.contrib.fastapi import register_tortoise
 
 from .managers import EventManager
-from .models import Job, Preset, PresetOut, JobOut
+from .models import Job, JobOut, Preset, PresetOut
 from .schemas import PresetCreate, PresetUpdate, TranscodingJob
 from .seed import seed_presets
 from .work_queue import JOB_QUEUE_NAME, consume_events, init_channels
@@ -72,17 +73,18 @@ s3 = boto3.client(
     endpoint_url=AWS_S3_ENDPOINT_URL,
 )
 
+
 register_tortoise(
     app,
     db_url=f"postgres://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}/{POSTGRES_DB}",
     modules={"models": ["distributed_transcoder_api.models"]},
-    generate_schemas=True,
     add_exception_handlers=True,
 )
 
 
 @app.on_event("startup")
-async def startup_event():
+async def seed_data():
+    await Tortoise.generate_schemas()
     await seed_presets()
     logger.info("Finished seeding presets")
 
@@ -190,12 +192,12 @@ async def submit_job(job: TranscodingJob):
     return {"job_id": job.job_id}
 
 
-@app.get("/jobs")
+@app.get("/jobs", response_model=List[JobOut])
 async def list_jobs(skip: int = Query(0, ge=0), limit: int = Query(10, ge=1, le=100)):
-    jobs = await Job.all().offset(skip).limit(limit)
+    jobs = await Job.all().offset(skip).limit(limit).prefetch_related("preset")
     if len(jobs) == 0:
         raise HTTPException(status_code=404, detail="No jobs found")
-    return {"jobs": jobs}
+    return jobs
 
 
 @app.get("/jobs/{job_id}", response_model=JobOut)

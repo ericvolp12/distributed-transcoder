@@ -11,20 +11,7 @@ import { ProgressMessage, isProgressMessage } from "../Messages";
 import NewJob from "../JobSubmission/NewJob";
 import "react-tooltip/dist/react-tooltip.css";
 import { Tooltip } from "react-tooltip";
-
-interface Job {
-  created_at: Date;
-  error_type?: string;
-  error?: string;
-  input_s3_path: string;
-  job_id: string;
-  output_s3_path: string;
-  pipeline?: string;
-  preset_id?: string;
-  preset_name?: string;
-  state: string;
-  updated_at: Date;
-}
+import { Job, Preset } from "../Models";
 
 interface Alert {
   type: "error" | "success";
@@ -108,25 +95,13 @@ const JobList = () => {
       }
 
       const data = await response.json();
-      let temp_jobs = data.jobs.map((job) => ({
+      let temp_jobs = data.map((job) => ({
         ...job,
         created_at: new Date(job.created_at),
         updated_at: new Date(job.updated_at),
       }));
 
-      const jobsWithPresetNames = await Promise.all(
-        temp_jobs.map(async (job: Job) => {
-          if (!job.preset_id) return { ...job, preset_name: "Custom Pipeline" };
-          try {
-            const presetName = await fetchPresetData(job.preset_id);
-            return { ...job, preset_name: presetName };
-          } catch (error) {
-            console.error(error);
-            return { ...job, preset_name: "Not found" };
-          }
-        })
-      );
-      setJobs(jobsWithPresetNames);
+      setJobs(temp_jobs);
     } catch (error) {
       console.error("Error fetching jobs:", error);
     } finally {
@@ -187,16 +162,6 @@ const JobList = () => {
         prevSockets.filter((socket) => socket !== jobId)
       );
     };
-  };
-
-  const fetchPresetData = async (presetId: string) => {
-    const response = await fetch(`http://localhost:8000/presets/${presetId}`);
-    if (response.ok) {
-      const preset = await response.json();
-      return preset.name;
-    } else {
-      throw new Error("Failed to fetch preset data");
-    }
   };
 
   const downloadFile = async (url: string, filename: string) => {
@@ -429,7 +394,7 @@ const JobList = () => {
                         )}
                       </td>
                       <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
-                        {job.preset_name}
+                        {job.preset.name}
                       </td>
                       <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
                         <button

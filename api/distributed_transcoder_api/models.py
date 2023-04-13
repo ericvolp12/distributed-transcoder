@@ -1,23 +1,6 @@
-from tortoise import fields
+from tortoise import fields, Tortoise
 from tortoise.models import Model
 from tortoise.contrib.pydantic import pydantic_model_creator
-
-
-class Job(Model):
-    id = fields.UUIDField(pk=True)
-    job_id = fields.CharField(max_length=50, unique=True)
-    input_s3_path = fields.CharField(max_length=255)
-    output_s3_path = fields.CharField(max_length=255)
-    pipeline = fields.TextField()
-    preset_id = fields.CharField(max_length=50, null=True)
-    state = fields.CharField(max_length=20, default="queued")
-    error = fields.TextField(null=True)
-    error_type = fields.CharField(max_length=50, null=True)
-    created_at = fields.DatetimeField(auto_now_add=True)
-    updated_at = fields.DatetimeField(auto_now=True)
-
-    class Meta:
-        ordering = ["-created_at"]
 
 
 class Preset(Model):
@@ -37,6 +20,29 @@ class Preset(Model):
     class Meta:
         ordering = ["name"]
 
+    class PydanticMeta:
+        exclude = ("jobs",)
 
+
+class Job(Model):
+    id = fields.UUIDField(pk=True)
+    job_id = fields.CharField(max_length=50, unique=True)
+    input_s3_path = fields.CharField(max_length=255)
+    output_s3_path = fields.CharField(max_length=255)
+    pipeline = fields.TextField()
+    preset: fields.ForeignKeyNullableRelation[Preset] = fields.ForeignKeyField(
+        "models.Preset", null=True
+    )
+    state = fields.CharField(max_length=20, default="queued")
+    error = fields.TextField(null=True)
+    error_type = fields.CharField(max_length=50, null=True)
+    created_at = fields.DatetimeField(auto_now_add=True)
+    updated_at = fields.DatetimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+
+Tortoise.init_models(["distributed_transcoder_api.models"], "models")
 PresetOut = pydantic_model_creator(Preset, name="PresetOut")
 JobOut = pydantic_model_creator(Job, name="JobOut")

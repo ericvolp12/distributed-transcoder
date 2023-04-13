@@ -2,21 +2,7 @@
 import { useEffect, useState, Fragment } from "react";
 import { Dialog, Transition } from "@headlessui/react";
 import { DocumentMagnifyingGlassIcon } from "@heroicons/react/24/outline";
-
-interface Preset {
-  preset_id: string;
-  name: string;
-  input_type: string;
-  output_type: string;
-  pipeline: string;
-  video_encoding: string;
-  video_bitrate: string;
-  resolution: string;
-  audio_encoding: string;
-  audio_bitrate: string;
-  created_at: Date;
-  updated_at: Date;
-}
+import { Job, Preset } from "../Models";
 
 const badgeClasses = {
   video_encoding: {
