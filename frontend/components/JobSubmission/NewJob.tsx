@@ -24,6 +24,9 @@ const NewJob = ({ setOpen, open }) => {
   const [jobStatus, setJobStatus] = useState<string>("");
   const [submitted, setSubmitted] = useState<boolean>(false);
   const [alert, setAlert] = useState<Alert | null>(null);
+  const [jobIdValidationStatus, setJobIdValidationStatus] = useState<
+    "idle" | "loading" | "valid" | "invalid"
+  >("idle");
 
   const dismissAlert = () => {
     setAlert(null);
@@ -57,26 +60,25 @@ const NewJob = ({ setOpen, open }) => {
       // Clear the state
       setJobId("");
       setProvisionalJobID("");
+      setJobIdValidationStatus("idle");
       setOutputPath("");
       setInputPath("");
       setSubmitted(false);
       setOpen(false);
-    }, 5000);
+    }, 2500);
   };
 
   const handleJobIDChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (provisionalJobID !== "") {
+      setJobIdValidationStatus("loading");
       try {
         const response = await fetch(
           `http://localhost:8000/jobs/${provisionalJobID}`,
-          {
-            method: "GET",
-            headers: { "Content-Type": "application/json" },
-          }
+          { method: "GET", headers: { "Content-Type": "application/json" } }
         );
-
         if (response.status === 404) {
           setJobId(provisionalJobID);
+          setJobIdValidationStatus("valid");
           return;
         } else if (response.status === 200) {
           setAlert({
@@ -84,6 +86,7 @@ const NewJob = ({ setOpen, open }) => {
             message: `A Job with ID (${provisionalJobID}) already exists, please use a different Job ID.`,
             autoDismiss: true,
           });
+          setJobIdValidationStatus("invalid");
         }
       } catch (err) {
         setAlert({
@@ -91,7 +94,10 @@ const NewJob = ({ setOpen, open }) => {
           message: `Failed to validate Job ID: ${err.message}`,
           autoDismiss: true,
         });
+        setJobIdValidationStatus("invalid");
       }
+    } else {
+      setJobIdValidationStatus("idle");
     }
   };
 
@@ -209,11 +215,17 @@ const NewJob = ({ setOpen, open }) => {
                               Assign a Job ID
                             </label>
                           </div>
-                          <div className="sm:col-span-2">
+                          <div className="sm:col-span-2 relative">
                             <input
                               type="text"
                               id="job-identifier"
-                              className="block w-full rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
+                              className={`block w-full rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6 pr-8 ${
+                                jobIdValidationStatus === "valid"
+                                  ? "bg-green-50"
+                                  : jobIdValidationStatus === "invalid"
+                                  ? "bg-red-50"
+                                  : ""
+                              }`}
                               value={provisionalJobID}
                               disabled={submitted}
                               onChange={(e) =>
@@ -222,36 +234,72 @@ const NewJob = ({ setOpen, open }) => {
                               onBlur={handleJobIDChange}
                               placeholder="Enter Job ID"
                             />
+                            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3">
+                              {jobIdValidationStatus === "loading" ? (
+                                <HashtagIcon
+                                  className="h-5 w-5 text-gray-500 "
+                                  aria-hidden="true"
+                                />
+                              ) : jobIdValidationStatus === "valid" ? (
+                                <CheckCircleIcon
+                                  className="h-5 w-5 text-green-400 "
+                                  aria-hidden="true"
+                                />
+                              ) : jobIdValidationStatus === "invalid" ? (
+                                <ExclamationTriangleIcon
+                                  className="h-5 w-5 text-red-400"
+                                  aria-hidden="true"
+                                />
+                              ) : null}
+                            </div>
                           </div>
                         </div>
 
-                        <div className="space-y-2 px-4 sm:grid sm:grid-cols-3 sm:gap-4 sm:space-y-0 sm:px-6 sm:py-5">
-                          <div>
-                            <label
-                              htmlFor="file-upload"
-                              className="block text-sm font-medium leading-6 text-gray-900 sm:mt-1.5"
-                            >
-                              Upload Source File
-                            </label>
+                        <div className="relative">
+                          <div className="space-y-2 px-4 sm:grid sm:grid-cols-3 sm:gap-4 sm:space-y-0 sm:px-6 sm:py-5">
+                            <div>
+                              <label
+                                htmlFor="file-upload"
+                                className="block text-sm font-medium leading-6 text-gray-900 sm:mt-1.5"
+                              >
+                                Upload Source File
+                              </label>
+                            </div>
+                            <div className="sm:col-span-2">
+                              <Upload onUpload={handleUpload} jobId={jobId} />
+                            </div>
                           </div>
-                          <div className="sm:col-span-2">
-                            <Upload onUpload={handleUpload} jobId={jobId} />
-                          </div>
-                        </div>
-
-                        <div className="space-y-2 px-4 sm:grid sm:grid-cols-3 sm:gap-4 sm:space-y-0 sm:px-6 sm:py-5">
-                          <div>
-                            <h3 className="text-sm font-medium leading-6 text-gray-900">
-                              Configure Job Settings
-                            </h3>
-                          </div>
-                          <div className="sm:col-span-2">
-                            <Submit
-                              jobId={jobId}
-                              inputPath={inputPath}
-                              onJobSubmit={handleJobSubmit}
+                          {jobIdValidationStatus !== "valid" && (
+                            <div
+                              className="absolute inset-0 bg-gray-300 opacity-50 z-10"
+                              aria-hidden="true"
                             />
+                          )}
+                        </div>
+
+                        <div className="relative">
+                          <div className="space-y-2 px-4 sm:grid sm:grid-cols-3 sm:gap-4 sm:space-y-0 sm:px-6 sm:py-5">
+                            <div>
+                              <h3 className="text-sm font-medium leading-6 text-gray-900">
+                                Configure Job Settings
+                              </h3>
+                            </div>
+                            <div className="sm:col-span-2">
+                              <Submit
+                                jobId={jobId}
+                                inputPath={inputPath}
+                                onJobSubmit={handleJobSubmit}
+                              />
+                            </div>
                           </div>
+                          {!(
+                            jobIdValidationStatus === "valid" && inputPath
+                          ) && (
+                            <div
+                              className="absolute inset-0 bg-gray-300 opacity-50 z-10"
+                              aria-hidden="true"
+                            />
+                          )}
                         </div>
                       </div>
                     </div>
