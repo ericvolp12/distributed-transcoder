@@ -2,7 +2,8 @@
 import { useEffect, useState, Fragment } from "react";
 import { Dialog, Transition } from "@headlessui/react";
 import { DocumentMagnifyingGlassIcon } from "@heroicons/react/24/outline";
-import { Job, Preset } from "../Models";
+import { Preset } from "../Models";
+import NewPreset from "./NewPreset";
 
 const badgeClasses = {
   video_encoding: {
@@ -117,10 +118,16 @@ const PresetList = () => {
   const [presetsLoading, setPresetsLoading] = useState(false);
   const [open, setOpen] = useState(false);
   const [selectedPipeline, setSelectedPipeline] = useState("");
+  const [isCreatePresetOpen, setIsCreatePresetOpen] = useState(false);
 
   useEffect(() => {
     fetchPresets();
   }, [pageSize, currentPage]);
+
+  const handlePresetCreatedSuccessfully = () => {
+    setIsCreatePresetOpen(false);
+    fetchPresets();
+  };
 
   const fetchPresetsWithPagination = async (skip: number, limit: number) => {
     setPresetsLoading(true);
@@ -167,6 +174,15 @@ const PresetList = () => {
           <p className="mt-2 text-sm text-gray-700">
             A list of all the available transcoding presets
           </p>
+        </div>
+        <div className="mt-4 sm:ml-16 sm:mt-0 sm:flex-none">
+          <button
+            type="button"
+            onClick={() => setIsCreatePresetOpen(true)}
+            className="block rounded-md bg-indigo-600 px-3 py-2 text-center text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
+          >
+            Create Preset
+          </button>
         </div>
       </div>
       <div className="mt-8 flow-root">
@@ -378,6 +394,11 @@ const PresetList = () => {
           </div>
         </div>
       </div>
+      <NewPreset
+        onSuccess={handlePresetCreatedSuccessfully}
+        open={isCreatePresetOpen}
+        setOpen={(open) => setIsCreatePresetOpen(open)}
+      />
     </div>
   );
 };

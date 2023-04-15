@@ -15,6 +15,11 @@ class PresetCreate(BaseModel):
     name: str
     input_type: str
     output_type: str
+    resolution: str
+    video_encoding: str
+    video_bitrate: str
+    audio_encoding: str
+    audio_bitrate: str
     pipeline: str
 
 
@@ -23,3 +28,8 @@ class PresetUpdate(BaseModel):
     input_type: Optional[str] = None
     output_type: Optional[str] = None
     pipeline: Optional[str] = None
+    resolution: Optional[str] = None
+    video_encoding: Optional[str] = None
+    video_bitrate: Optional[str] = None
+    audio_encoding: Optional[str] = None
+    audio_bitrate: Optional[str] = None
