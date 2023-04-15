@@ -119,6 +119,37 @@ const JobList = () => {
     fetchJobs();
   };
 
+  const handleCancel = async (jobId: string) => {
+    try {
+      const response = await fetch(`http://localhost:8000/jobs/${jobId}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ state: "cancelled" }),
+      });
+
+      if (response.status === 404) {
+        setAlert({
+          type: "error",
+          message: "Job not found",
+          autoDismiss: true,
+        });
+      } else if (response.status !== 200) {
+        setAlert({
+          type: "error",
+          message: `Unable to cancel job: ${response.status}`,
+          autoDismiss: true,
+        });
+        console.log(await response.json());
+      }
+    } catch (error) {
+      console.error("Cancelling job:", error);
+    } finally {
+      fetchJobs();
+    }
+  };
+
   const handleJobProgress = (jobId: string) => {
     if (connectedSockets.includes(jobId)) {
       return;
@@ -224,7 +255,7 @@ const JobList = () => {
     if (alert && alert.autoDismiss) {
       const timer = setTimeout(() => {
         setAlert(null);
-      }, 10000);
+      }, 2500);
       return () => clearTimeout(timer);
     }
   }, [alert]);
@@ -356,6 +387,12 @@ const JobList = () => {
                     >
                       Updated At
                     </th>
+                    <th
+                      scope="col"
+                      className="px-3 py-3.5 text-center text-sm font-semibold text-gray-900"
+                    >
+                      Cancel
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200 bg-white">
@@ -410,26 +447,49 @@ const JobList = () => {
                         {" " + job.input_s3_path}
                       </td>
                       <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
-                        <button
-                          type="button"
-                          className="relative focus:outline-none"
-                          onClick={() =>
-                            handleDownload(
-                              job.output_s3_path,
-                              job.job_id + "_output"
-                            )
-                          }
-                        >
-                          {loadingJob === job.job_id + "_output" ? (
-                            <CircularProgress progress={progress} />
-                          ) : (
-                            <CloudArrowDownIcon className="inline-block w-4 h-4 ml-1" />
-                          )}
-                        </button>
-                        {" " + job.output_s3_path}
+                        {job.state === "completed" ? (
+                          <>
+                            <button
+                              type="button"
+                              className="relative focus:outline-none"
+                              onClick={() =>
+                                handleDownload(
+                                  job.output_s3_path,
+                                  job.job_id + "_output"
+                                )
+                              }
+                            >
+                              {loadingJob === job.job_id + "_output" ? (
+                                <CircularProgress progress={progress} />
+                              ) : (
+                                <CloudArrowDownIcon className="inline-block w-4 h-4 ml-1" />
+                              )}
+                            </button>
+                            {" " + job.output_s3_path}
+                          </>
+                        ) : (
+                          <span className="text-gray-400 ml-5">
+                            Job Incomplete
+                          </span>
+                        )}
                       </td>
                       <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
                         {job.updated_at.toLocaleString()}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-2 text-sm text-gray-500">
+                        {(job.state === "queued" && (
+                          <button
+                            type="button"
+                            className="inline-flex rounded-md bg-red-50 p-1.5 text-red-500 hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-red-600 focus:ring-offset-2 focus:ring-offset-green-50 ml-4"
+                            onClick={() => handleCancel(job.job_id)}
+                          >
+                            {loadingJob === job.job_id ? (
+                              <CircularProgress progress={progress} />
+                            ) : (
+                              <XMarkIcon className="h-4 w-4" />
+                            )}
+                          </button>
+                        )) || <span className="text-gray-400 ml-5">N/A</span>}
                       </td>
                     </tr>
                   ))}

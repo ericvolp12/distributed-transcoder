@@ -1,11 +1,12 @@
 [tool.poetry]
 name = "distributed-transcoder-common"
-version = "0.2.2"
+version = "0.2.3"
 description = "A common library for for the distributed transcoder project"
 authors = ["Eric Volpert <ericvolp12@gmail.com>"]
 
 [tool.poetry.dependencies]
 python = "^3.9"
+tortoise-orm = "^0.19.3"
 
 [tool.poetry.dev-dependencies]
 

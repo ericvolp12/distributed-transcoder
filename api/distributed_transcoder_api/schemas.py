@@ -33,3 +33,13 @@ class PresetUpdate(BaseModel):
     video_bitrate: Optional[str] = None
     audio_encoding: Optional[str] = None
     audio_bitrate: Optional[str] = None
+
+
+class JobUpdate(BaseModel):
+    input_s3_path: Optional[str] = None
+    output_s3_path: Optional[str] = None
+    pipeline: Optional[str] = None
+    preset_id: Optional[str] = None
+    state: Optional[str] = None
+    error: Optional[str] = None
+    error_type: Optional[str] = None

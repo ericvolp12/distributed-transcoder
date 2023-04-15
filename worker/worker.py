@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import os
@@ -18,6 +19,7 @@ from distributed_transcoder_common import (
     JobResultMessage,
     JobSubmissionMessage,
 )
+from distributed_transcoder_common.models import Job, Preset
 from errors import (
     FailedMidTranscode,
     FailedToParsePipeline,
@@ -27,6 +29,7 @@ from errors import (
 )
 from pika.channel import Channel
 from pika.spec import Basic, BasicProperties
+from tortoise import Tortoise
 from work_queue import init_channels
 
 gi.require_version("Gst", "1.0")
@@ -38,7 +41,10 @@ AWS_SECRET_ACCESS_KEY = os.environ["AWS_SECRET_ACCESS_KEY"]
 S3_BUCKET_NAME = os.environ["S3_BUCKET_NAME"]
 AWS_S3_ENDPOINT_URL = os.environ["AWS_S3_ENDPOINT_URL"]
 TIMEOUT_SECONDS = 60  # 1 minute
-
+POSTGRES_USER = os.environ["POSTGRES_USER"]
+POSTGRES_PASSWORD = os.environ["POSTGRES_PASSWORD"]
+POSTGRES_DB = os.environ["POSTGRES_DB"]
+POSTGRES_HOST = os.environ["POSTGRES_HOST"]
 
 # Generate a random 5-character worker ID
 worker_id = "".join(random.choices(string.ascii_lowercase + string.digits, k=5))
@@ -70,6 +76,21 @@ s3_client = boto3.client(
     aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
     endpoint_url=AWS_S3_ENDPOINT_URL,
 )
+
+
+# Run an async task to connect to Tortoise
+async def connect_tortoise():
+    """
+    Connect to the Tortoise database.
+    """
+    await Tortoise.init(
+        db_url=f"postgres://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}:5432/{POSTGRES_DB}",
+        modules={"models": ["distributed_transcoder_common.models"]},
+    )
+
+
+# Start the async task in a coroutine
+asyncio.get_event_loop().run_until_complete(connect_tortoise())
 
 
 def on_gst_message(
@@ -127,9 +148,10 @@ def on_gst_message(
 def check_timeout(
     loop: GLib.MainLoop, pipeline: Gst.Pipeline, ch: Channel, job_id: str
 ):
-    global last_progress_time
-    global transcoding_error
+    global last_progress_time, transcoding_error, job_finished
     while True:
+        if job_finished:
+            break
         if time.time() - last_progress_time > TIMEOUT_SECONDS:
             error_msg = f"Pipeline failed to progress after {TIMEOUT_SECONDS} seconds"
             error_type = "pipeline_timeout"
@@ -179,11 +201,10 @@ def transcode(
     bus.connect("message", on_gst_message, (loop, pipeline, ch, job_id))
 
     # Initialize global variables for mid-transcode error handling
-    global last_progress_time
+    global last_progress_time, transcoding_error, job_finished
     last_progress_time = time.time()
-
-    global transcoding_error
     transcoding_error = (None, None)
+    job_finished = False
 
     timeout_checker = threading.Thread(
         target=check_timeout, args=(loop, pipeline, ch, job_id)
@@ -204,6 +225,7 @@ def transcode(
         raise FailedMidTranscode(e)
     finally:
         pipeline.set_state(Gst.State.NULL)
+        job_finished = True
     if transcoding_error[0] is not None:
         error_type, error_msg = transcoding_error
         if error_type == "pipeline_timeout":
@@ -254,7 +276,7 @@ def send_transcode_result(
     ch.basic_ack(delivery_tag=method.delivery_tag)
 
 
-def process_workqueue_message(
+async def process_workqueue_message(
     ch: Channel,
     method: Basic.Deliver,
     properties: BasicProperties,
@@ -271,72 +293,99 @@ def process_workqueue_message(
     logger.info("Received a new transcoding job")
     job_data = JobSubmissionMessage(**json.loads(body))
 
-    with tempfile.NamedTemporaryFile() as input_file, tempfile.NamedTemporaryFile() as output_file:
-        # Download the input chunk
-        dl_start = time.time()
-        logger.info(f"Downloading input chunk from S3: {job_data.input_s3_path}")
-        try:
-            s3_client.download_file(
-                S3_BUCKET_NAME, job_data.input_s3_path, input_file.name
-            )
-        except ClientError as e:
-            logger.error(f"Unable to download input chunk: {e}")
-            ch.basic_publish(
-                exchange="results_logs",
-                routing_key=RESULTS_QUEUE_NAME,
-                body=json.dumps(
-                    asdict(
-                        JobResultMessage(
-                            status="failed",
-                            job_id=job_data.job_id,
-                            error=str(e),
-                            error_type="s3_download",
-                        )
-                    )
-                ),
-            )
-            ch.basic_ack(delivery_tag=method.delivery_tag)
-            return
+    # Confirm job hasn't been cancelled or already claimed
+    job = await Job.get_or_none(job_id=job_data.job_id)
+
+    if job is None:
         logger.info(
-            f"Chunk finished downloading to: {input_file.name} in {time.time() - dl_start} seconds"
+            f"Job {job_data.job_id} could not be found in the DB, skipping processing. Message body: {job_data}"
         )
+        ch.basic_ack(delivery_tag=method.delivery_tag)
+        return
 
-        # Transcode the input chunk
-        try:
-            transcode(
-                input_file.name,
-                output_file.name,
-                job_data.transcode_options,
-                ch,
-                job_data.job_id,
-            )
-        except TranscodeException as e:
-            handle_transcode_exception(ch, method, e, job_data.job_id)
-            return
-        except Exception as e:
-            handle_transcode_exception(
-                ch, method, TranscodeException("unknown", str(e)), job_data.job_id
-            )
-            return
-        logger.info("Transcoding completed")
+    if job.state == "cancelled":
+        logger.info(f"Job {job_data.job_id} has been cancelled, skipping processing.")
+        ch.basic_ack(delivery_tag=method.delivery_tag)
+        return
 
-        # Upload the output chunk
-        logger.info(f"Uploading output chunk to S3: {job_data.output_s3_path}")
-        try:
-            s3_client.upload_file(
-                output_file.name, S3_BUCKET_NAME, job_data.output_s3_path
+    if job.state == "in-progress":
+        logger.info(
+            f"Job {job_data.job_id} is already in progress, skipping processing."
+        )
+        ch.basic_ack(delivery_tag=method.delivery_tag)
+        return
+
+    elif job.state == "queued":
+        with tempfile.NamedTemporaryFile() as input_file, tempfile.NamedTemporaryFile() as output_file:
+            # Download the input chunk
+            dl_start = time.time()
+            logger.info(f"Downloading input chunk from S3: {job_data.input_s3_path}")
+            try:
+                s3_client.download_file(
+                    S3_BUCKET_NAME, job_data.input_s3_path, input_file.name
+                )
+            except ClientError as e:
+                logger.error(f"Unable to download input chunk: {e}")
+                ch.basic_publish(
+                    exchange="results_logs",
+                    routing_key=RESULTS_QUEUE_NAME,
+                    body=json.dumps(
+                        asdict(
+                            JobResultMessage(
+                                status="failed",
+                                job_id=job_data.job_id,
+                                error=str(e),
+                                error_type="s3_download",
+                            )
+                        )
+                    ),
+                )
+                ch.basic_ack(delivery_tag=method.delivery_tag)
+                return
+            logger.info(
+                f"Chunk finished downloading to: {input_file.name} in {time.time() - dl_start} seconds"
             )
-        except ClientError as e:
-            logger.error(f"Unable to upload output chunk: {e}")
-            send_transcode_result(
-                ch,
-                method,
-                "failed",
-                job_data.job_id,
-                error=str(e),
-                error_type="s3_upload",
-            )
-            return
+
+            # Transcode the input chunk
+            try:
+                transcode(
+                    input_file.name,
+                    output_file.name,
+                    job_data.transcode_options,
+                    ch,
+                    job_data.job_id,
+                )
+            except TranscodeException as e:
+                handle_transcode_exception(ch, method, e, job_data.job_id)
+                return
+            except Exception as e:
+                handle_transcode_exception(
+                    ch, method, TranscodeException("unknown", str(e)), job_data.job_id
+                )
+                return
+            logger.info("Transcoding completed")
+
+            # Upload the output chunk
+            logger.info(f"Uploading output chunk to S3: {job_data.output_s3_path}")
+            try:
+                s3_client.upload_file(
+                    output_file.name, S3_BUCKET_NAME, job_data.output_s3_path
+                )
+            except ClientError as e:
+                logger.error(f"Unable to upload output chunk: {e}")
+                send_transcode_result(
+                    ch,
+                    method,
+                    "failed",
+                    job_data.job_id,
+                    error=str(e),
+                    error_type="s3_upload",
+                )
+                return
+    else:
+        logger.error(f"Job {job_data.job_id} is in an unexpected state: {job.state}")
+        ch.basic_ack(delivery_tag=method.delivery_tag)
+        return
 
     # Send a completion message with the output chunk's blob ID
     send_transcode_result(
@@ -377,8 +426,8 @@ def main():
     channel.basic_consume(
         queue=JOB_QUEUE_NAME,
         consumer_tag="worker-{}".format(worker_id),
-        on_message_callback=lambda ch, method, properties, body: process_workqueue_message(
-            ch, method, properties, body
+        on_message_callback=lambda ch, method, properties, body: asyncio.get_event_loop().run_until_complete(
+            process_workqueue_message(ch, method, properties, body)
         ),
     )
 

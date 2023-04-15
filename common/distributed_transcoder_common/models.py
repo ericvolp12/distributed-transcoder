@@ -43,6 +43,6 @@ class Job(Model):
         ordering = ["-created_at"]
 
 
-Tortoise.init_models(["distributed_transcoder_api.models"], "models")
+Tortoise.init_models(["distributed_transcoder_common.models"], "models")
 PresetOut = pydantic_model_creator(Preset, name="PresetOut")
 JobOut = pydantic_model_creator(Job, name="JobOut")

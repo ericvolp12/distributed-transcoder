@@ -36,7 +36,7 @@ const NewJob = ({ setOpen, open }) => {
     if (alert && alert.autoDismiss) {
       const timer = setTimeout(() => {
         setAlert(null);
-      }, 10000);
+      }, 2500);
       return () => clearTimeout(timer);
     }
   }, [alert]);

@@ -1,4 +1,4 @@
-from distributed_transcoder_api.models import Preset
+from distributed_transcoder_common.models import Preset
 
 
 async def seed_presets():

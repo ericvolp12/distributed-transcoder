@@ -14,6 +14,7 @@ from distributed_transcoder_common import (
     JobResultMessage,
     JobSubmissionMessage,
 )
+from distributed_transcoder_common.models import Job, JobOut, Preset, PresetOut
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -23,8 +24,7 @@ from tortoise import Tortoise
 from tortoise.contrib.fastapi import register_tortoise
 
 from .managers import EventManager
-from .models import Job, JobOut, Preset, PresetOut
-from .schemas import PresetCreate, PresetUpdate, TranscodingJob
+from .schemas import JobUpdate, PresetCreate, PresetUpdate, TranscodingJob
 from .seed import seed_presets
 from .work_queue import JOB_QUEUE_NAME, consume_events, init_channels
 
@@ -77,7 +77,7 @@ s3 = boto3.client(
 register_tortoise(
     app,
     db_url=f"postgres://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}/{POSTGRES_DB}",
-    modules={"models": ["distributed_transcoder_api.models"]},
+    modules={"models": ["distributed_transcoder_common.models"]},
     add_exception_handlers=True,
 )
 
@@ -176,6 +176,9 @@ async def submit_job(job: TranscodingJob):
             detail="Either preset_id or pipeline must be provided",
         )
 
+    # Create a record in the database
+    await Job.create(**job.dict())
+
     job_submission_message = JobSubmissionMessage(
         job_id=job.job_id,
         input_s3_path=job.input_s3_path,
@@ -187,8 +190,6 @@ async def submit_job(job: TranscodingJob):
         routing_key=JOB_QUEUE_NAME,
         body=json.dumps(asdict(job_submission_message)),
     )
-    # Create a record in the database
-    await Job.create(**job.dict())
     return {"job_id": job.job_id}
 
 
@@ -202,10 +203,22 @@ async def list_jobs(skip: int = Query(0, ge=0), limit: int = Query(10, ge=1, le=
 
 @app.get("/jobs/{job_id}", response_model=JobOut)
 async def get_job(job_id: str):
-    job = await Job.get_or_none(job_id=job_id)
+    job = await Job.get_or_none(job_id=job_id).prefetch_related("preset")
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     return job
+
+
+@app.put("/jobs/{job_id}", response_model=JobOut)
+async def update_job(job_id: str, job: JobUpdate):
+    existing_job = await Job.get_or_none(job_id=job_id).prefetch_related("preset")
+    if not existing_job:
+        raise HTTPException(status_code=404, detail="Preset not found")
+
+    for key, value in job.dict(exclude_none=True).items():
+        setattr(existing_job, key, value)
+    await existing_job.save()
+    return existing_job
 
 
 @app.post("/presets", response_model=PresetOut)
