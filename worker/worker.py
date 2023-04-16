@@ -36,11 +36,16 @@ gi.require_version("Gst", "1.0")
 from gi.repository import GLib, Gst
 
 # Constants
-AWS_ACCESS_KEY_ID = os.environ["AWS_ACCESS_KEY_ID"]
-AWS_SECRET_ACCESS_KEY = os.environ["AWS_SECRET_ACCESS_KEY"]
+# S3 Config
+S3_ACCESS_KEY_ID = os.environ["S3_ACCESS_KEY_ID"]
+S3_SECRET_ACCESS_KEY = os.environ["S3_SECRET_ACCESS_KEY"]
 S3_BUCKET_NAME = os.environ["S3_BUCKET_NAME"]
-AWS_S3_ENDPOINT_URL = os.environ["AWS_S3_ENDPOINT_URL"]
+S3_ENDPOINT_URL = os.environ["S3_ENDPOINT_URL"]
+
+# Worker Lifecycle Config
 TIMEOUT_SECONDS = 60  # 1 minute
+
+# DB Config
 POSTGRES_USER = os.environ["POSTGRES_USER"]
 POSTGRES_PASSWORD = os.environ["POSTGRES_PASSWORD"]
 POSTGRES_DB = os.environ["POSTGRES_DB"]
@@ -49,10 +54,14 @@ POSTGRES_HOST = os.environ["POSTGRES_HOST"]
 # Generate a random 5-character worker ID
 worker_id = "".join(random.choices(string.ascii_lowercase + string.digits, k=5))
 
-# Define constants for queues
+# RabbitMQ Config
 JOB_QUEUE_NAME = f"transcoding_jobs"
 PROGRESS_QUEUE_NAME = f"transcoding_progress.{worker_id}"
 RESULTS_QUEUE_NAME = f"transcoding_results.{worker_id}"
+RMQ_HOST = os.environ["RMQ_HOST"]
+RMQ_PORT = int(os.environ["RMQ_PORT"])
+RMQ_USER = os.environ["RMQ_USER"]
+RMQ_PASSWORD = os.environ["RMQ_PASSWORD"]
 
 # Set up logging
 logging.basicConfig(
@@ -72,9 +81,9 @@ for log_name, log_level in [
 # Set up S3 client
 s3_client = boto3.client(
     service_name="s3",
-    aws_access_key_id=AWS_ACCESS_KEY_ID,
-    aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
-    endpoint_url=AWS_S3_ENDPOINT_URL,
+    aws_access_key_id=S3_ACCESS_KEY_ID,
+    aws_secret_access_key=S3_SECRET_ACCESS_KEY,
+    endpoint_url=S3_ENDPOINT_URL,
 )
 
 
@@ -243,7 +252,7 @@ def handle_transcode_exception(
     job_id: str,
 ):
     send_transcode_result(
-        ch, method, "failed", job_id, error=str(e), error_type=e.error_type
+        ch, method, Job.STATE_FAILED, job_id, error=str(e), error_type=e.error_type
     )
 
 
@@ -303,12 +312,12 @@ async def process_workqueue_message(
         ch.basic_ack(delivery_tag=method.delivery_tag)
         return
 
-    if job.state == "cancelled":
+    if job.state == Job.STATE_CANCELLED:
         logger.info(f"Job {job_data.job_id} has been cancelled, skipping processing.")
         ch.basic_ack(delivery_tag=method.delivery_tag)
         return
 
-    if job.state == "in-progress":
+    if job.state == Job.STATE_IN_PROGRESS:
         logger.info(
             f"Job {job_data.job_id} is already in progress, skipping processing."
         )
@@ -332,7 +341,7 @@ async def process_workqueue_message(
                     body=json.dumps(
                         asdict(
                             JobResultMessage(
-                                status="failed",
+                                status=Job.STATE_FAILED,
                                 job_id=job_data.job_id,
                                 error=str(e),
                                 error_type="s3_download",
@@ -376,7 +385,7 @@ async def process_workqueue_message(
                 send_transcode_result(
                     ch,
                     method,
-                    "failed",
+                    Job.STATE_FAILED,
                     job_data.job_id,
                     error=str(e),
                     error_type="s3_upload",
@@ -391,7 +400,7 @@ async def process_workqueue_message(
     send_transcode_result(
         ch,
         method,
-        "completed",
+        Job.STATE_COMPLETED,
         job_data.job_id,
         output_s3_path=job_data.output_s3_path,
     )
@@ -402,24 +411,20 @@ def main():
     Gst.init(None)
 
     # Connect to RabbitMQ and set up a channel
-    credentials = pika.PlainCredentials("guest", "guest")
-    rabbitmq_host = "rabbitmq"
-    rabbitmq_port = 5672
+    credentials = pika.PlainCredentials(RMQ_USER, RMQ_PASSWORD)
 
     try:
         channel, connection = init_channels(
-            rabbitmq_host,
-            rabbitmq_port,
+            RMQ_HOST,
+            RMQ_PORT,
             credentials,
             JOB_QUEUE_NAME,
             RESULTS_QUEUE_NAME,
             PROGRESS_QUEUE_NAME,
         )
-        logger.info(f"Connected to RabbitMQ on {rabbitmq_host}:{rabbitmq_port}")
+        logger.info(f"Connected to RabbitMQ on {RMQ_HOST}:{RMQ_PORT}")
     except Exception:
-        logger.error(
-            f"Unable to connect to RabbitMQ on {rabbitmq_host}:{rabbitmq_port}"
-        )
+        logger.error(f"Unable to connect to RabbitMQ on {RMQ_HOST}:{RMQ_PORT}")
         return
 
     channel.basic_qos(prefetch_count=1)

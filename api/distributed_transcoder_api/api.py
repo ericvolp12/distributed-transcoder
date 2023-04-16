@@ -1,13 +1,16 @@
 import asyncio
+import contextlib
 import json
 import logging
 import os
+import random
+import string
 import tempfile
 from dataclasses import asdict
 from typing import Dict, List, Optional
 
+import aio_pika
 import boto3
-import pika
 from botocore.exceptions import ClientError
 from distributed_transcoder_common import (
     JobProgressMessage,
@@ -15,13 +18,12 @@ from distributed_transcoder_common import (
     JobSubmissionMessage,
 )
 from distributed_transcoder_common.models import Job, JobOut, Preset, PresetOut
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile, WebSocket
+from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
-from pika.adapters.blocking_connection import BlockingChannel
+from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.websockets import WebSocketDisconnect
-from tortoise import Tortoise
-from tortoise.contrib.fastapi import register_tortoise
+from tortoise import Tortoise, connections
+from tortoise.exceptions import DoesNotExist, IntegrityError
 
 from .managers import EventManager
 from .schemas import JobUpdate, PresetCreate, PresetUpdate, TranscodingJob
@@ -29,19 +31,31 @@ from .seed import seed_presets
 from .work_queue import JOB_QUEUE_NAME, consume_events, init_channels
 
 # Constants
-AWS_ACCESS_KEY_ID = os.environ["AWS_ACCESS_KEY_ID"]
-AWS_SECRET_ACCESS_KEY = os.environ["AWS_SECRET_ACCESS_KEY"]
+# S3 Config
+S3_ACCESS_KEY_ID = os.environ["S3_ACCESS_KEY_ID"]
+S3_SECRET_ACCESS_KEY = os.environ["S3_SECRET_ACCESS_KEY"]
 S3_BUCKET_NAME = os.environ["S3_BUCKET_NAME"]
-AWS_S3_ENDPOINT_URL = os.environ["AWS_S3_ENDPOINT_URL"]
+S3_ENDPOINT_URL = os.environ["S3_ENDPOINT_URL"]
+
+# DB Config
 POSTGRES_USER = os.environ["POSTGRES_USER"]
 POSTGRES_PASSWORD = os.environ["POSTGRES_PASSWORD"]
 POSTGRES_DB = os.environ["POSTGRES_DB"]
 POSTGRES_HOST = os.environ["POSTGRES_HOST"]
 
+# RabbitMQ Config
+RMQ_HOST = os.environ["RMQ_HOST"]
+RMQ_PORT = int(os.environ["RMQ_PORT"])
+RMQ_USER = os.environ["RMQ_USER"]
+RMQ_PASSWORD = os.environ["RMQ_PASSWORD"]
+
+# Generate a random 5-character API Instance ID
+api_instance_id = "".join(random.choices(string.ascii_lowercase + string.digits, k=5))
+
 # Set up logging
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s (%(name)s) [%(levelname)s]: %(message)s",
+    format=f"%(asctime)s |{api_instance_id}| (%(name)s) [%(levelname)s]: %(message)s",
     handlers=[logging.StreamHandler()],
 )
 logger = logging.getLogger(__name__)
@@ -53,7 +67,67 @@ for log_name, log_level in [
 ]:
     logging.getLogger(log_name).setLevel(log_level)
 
-app = FastAPI()
+global channel
+
+
+@contextlib.asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("Lifecycle starting up...")
+    logger.info("Initializing Tortoise ORM...")
+    await Tortoise.init(
+        db_url=f"postgres://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}/{POSTGRES_DB}",
+        modules={"models": ["distributed_transcoder_common.models"]},
+    )
+    await Tortoise.generate_schemas()
+    logger.info("Tortoise-ORM started")
+
+    loop = asyncio.get_event_loop()
+    global channel
+
+    logger.info("Initializing RabbitMQ channels...")
+    channel, connection = await init_channels(
+        RMQ_HOST, RMQ_PORT, RMQ_USER, RMQ_PASSWORD
+    )
+
+    logger.info("Starting RabbitMQ event consumer...")
+    # Start the event consumer and prevent it from being GC'd
+    event_consumption = loop.create_task(
+        consume_events(channel, result_callback, progress_callback)
+    )
+
+    logger.info("Seeding presets...")
+    await seed_presets()
+    logger.info("Finished seeding presets")
+
+    # Yield control back to the application
+    yield
+
+    # Run on FastAPI shutdown
+    logger.info("Closing RabbitMQ connection...")
+    await connection.close()
+
+    logger.info("Closing Tortoise ORM connection...")
+    await connections.close_all()
+    logger.info("Lifecycle shutdown complete")
+
+
+app = FastAPI(lifespan=lifespan)
+
+
+# Handle Tortoise ORM Exceptions
+@app.exception_handler(DoesNotExist)
+async def doesnotexist_exception_handler(request: Request, exc: DoesNotExist):
+    return JSONResponse(status_code=404, content={"detail": str(exc)})
+
+
+@app.exception_handler(IntegrityError)
+async def integrityerror_exception_handler(request: Request, exc: IntegrityError):
+    return JSONResponse(
+        status_code=422,
+        content={"detail": [{"loc": [], "msg": str(exc), "type": "IntegrityError"}]},
+    )
+
+
 origins = [
     "http://localhost",
     "http://localhost:3000",
@@ -68,37 +142,18 @@ app.add_middleware(
 )
 s3 = boto3.client(
     service_name="s3",
-    aws_access_key_id=AWS_ACCESS_KEY_ID,
-    aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
-    endpoint_url=AWS_S3_ENDPOINT_URL,
+    aws_access_key_id=S3_ACCESS_KEY_ID,
+    aws_secret_access_key=S3_SECRET_ACCESS_KEY,
+    endpoint_url=S3_ENDPOINT_URL,
 )
 
-
-register_tortoise(
-    app,
-    db_url=f"postgres://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}/{POSTGRES_DB}",
-    modules={"models": ["distributed_transcoder_common.models"]},
-    add_exception_handlers=True,
-)
-
-
-@app.on_event("startup")
-async def seed_data():
-    await Tortoise.generate_schemas()
-    await seed_presets()
-    logger.info("Finished seeding presets")
-
-
-credentials = pika.PlainCredentials("guest", "guest")
-channel, connection = init_channels("rabbitmq", 5672, credentials)
 
 last_progress_messages: Dict[str, JobProgressMessage] = {}
-finished_jobs: Dict[str, JobResultMessage] = {}
 
 event_manager = EventManager()
 
 
-async def progress_callback(ch: BlockingChannel, method, properties, body):
+async def progress_callback(message: aio_pika.abc.AbstractIncomingMessage):
     """
     Callback for when a progress message is received from the work queue.
 
@@ -109,15 +164,15 @@ async def progress_callback(ch: BlockingChannel, method, properties, body):
 
     :return: None
     """
-    msg = JobProgressMessage(**json.loads(body))
+    msg = JobProgressMessage(**json.loads(message.body.decode()))
     # Store the progress message in a dictionary so we can serve it to newly connected clients
     last_progress_messages[msg.job_id] = msg
     # Update the job state to 'in-progress'
-    await Job.filter(job_id=msg.job_id).update(state="in-progress")
+    await Job.filter(job_id=msg.job_id).update(state=Job.STATE_IN_PROGRESS)
     await event_manager.send_message(msg.job_id, "progress", asdict(msg))
 
 
-async def result_callback(ch: BlockingChannel, method, properties, body):
+async def result_callback(message: aio_pika.abc.AbstractIncomingMessage):
     """
     Callback for when a result message is received from the work queue.
 
@@ -128,20 +183,15 @@ async def result_callback(ch: BlockingChannel, method, properties, body):
 
     :return: None
     """
-    result = JobResultMessage(**json.loads(body))
-    # Store the result in a dictionary so we can tell newly connected clients that the job is done
-    finished_jobs[result.job_id] = result
+    result = JobResultMessage(**json.loads(message.body.decode()))
+    # Remove the job from the in-progress tracker
     last_progress_messages.pop(result.job_id, None)
     # Update the job state to 'completed' or 'failed'
     await Job.filter(job_id=result.job_id).update(
         state=result.status, error=result.error, error_type=result.error_type
     )
-    if result.status == "completed" or result.status == "failed":
+    if result.status == Job.STATE_COMPLETED or result.status == Job.STATE_FAILED:
         await event_manager.send_message(result.job_id, "completion", asdict(result))
-
-
-loop = asyncio.get_event_loop()
-loop.create_task(consume_events(channel, result_callback, progress_callback))
 
 
 @app.post("/upload")
@@ -185,11 +235,15 @@ async def submit_job(job: TranscodingJob):
         output_s3_path=job.output_s3_path,
         transcode_options=job.pipeline,
     )
-    channel.basic_publish(
-        exchange="",
+
+    await channel.default_exchange.publish(
+        aio_pika.Message(
+            json.dumps(asdict(job_submission_message)).encode(),
+            content_type="application/json",
+        ),
         routing_key=JOB_QUEUE_NAME,
-        body=json.dumps(asdict(job_submission_message)),
     )
+
     return {"job_id": job.job_id}
 
 
@@ -303,8 +357,15 @@ async def progress(websocket: WebSocket, job_id: str):
         await websocket.send_json({"error": "Job not yet submitted"})
 
     # If the job is already done, send the completion message and close the connection
-    if job_id in finished_jobs:
-        await websocket.send_json(asdict(finished_jobs[job_id]))
+    if job.state != Job.STATE_IN_PROGRESS and job.state != Job.STATE_QUEUED:
+        result_message = JobResultMessage(
+            job_id=job.job_id,
+            output_s3_path=job.output_s3_path,
+            status=job.state,
+            error=job.error,
+            error_type=job.error_type,
+        )
+        await websocket.send_json(asdict(result_message))
         await websocket.close()
         return
 

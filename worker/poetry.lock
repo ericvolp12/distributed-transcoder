@@ -98,7 +98,7 @@ python-versions = "!=3.0.*,!=3.1.*,!=3.2.*,!=3.3.*,!=3.4.*,!=3.5.*,!=3.6.*,>=2.7
 
 [[package]]
 name = "distributed-transcoder-common"
-version = "0.2.3"
+version = "0.2.5"
 description = "A common library for for the distributed transcoder project"
 category = "main"
 optional = false
@@ -283,7 +283,7 @@ asyncmy = ["asyncmy (>=0.2.5,<0.3.0)"]
 asyncodbc = ["asyncodbc (>=0.1.1,<0.2.0)"]
 asyncpg = ["asyncpg"]
 accel = ["ciso8601", "orjson", "uvloop"]
-psycopg = ["psycopg[binary,pool] (==3.0.12)"]
+psycopg = ["psycopg[pool,binary] (==3.0.12)"]
 
 [[package]]
 name = "typing-extensions"
@@ -309,7 +309,7 @@ socks = ["PySocks (>=1.5.6,!=1.5.7,<2.0)"]
 [metadata]
 lock-version = "1.1"
 python-versions = "^3.9"
-content-hash = "681610af58131cf3be5a87ca0cd341833591d350252d4d3fd33d61b08627997c"
+content-hash = "e18b69009db7b060f055d23b9068aacde508b79ff7eb0eeeb279e84e8ea3292e"
 
 [metadata.files]
 aiosqlite = [
@@ -398,8 +398,8 @@ colorama = [
     {file = "colorama-0.4.6.tar.gz", hash = "sha256:08695f5cb7ed6e0531a20572697297273c47b8cae5a63ffc6d6ed5c201be6e44"},
 ]
 distributed-transcoder-common = [
-    {file = "distributed-transcoder-common-0.2.3.tar.gz", hash = "sha256:02e4a7f8993429036e256553ba30d70ab166a8469ea20d375f9fcb457c3dcbe1"},
-    {file = "distributed_transcoder_common-0.2.3-py3-none-any.whl", hash = "sha256:ceeac582a0afd8cb8227e6f1c6303a7580c17f1aabec2cedd02de65481f49d79"},
+    {file = "distributed-transcoder-common-0.2.5.tar.gz", hash = "sha256:631899832f76ef6556a92e38e8c5c08c6d54814d9cf2f4d0cc9c585716766923"},
+    {file = "distributed_transcoder_common-0.2.5-py3-none-any.whl", hash = "sha256:59830b57216ec8d056206b78352d88b69870913d21d0f607895f00d33cb468be"},
 ]
 iso8601 = [
     {file = "iso8601-1.1.0-py3-none-any.whl", hash = "sha256:8400e90141bf792bce2634df533dc57e3bee19ea120a87bebcd3da89a58ad73f"},

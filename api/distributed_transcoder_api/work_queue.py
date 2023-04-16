@@ -1,109 +1,84 @@
 import asyncio
 import logging
-import time
 from typing import Tuple, Callable
-
-import pika
-from pika.adapters.blocking_connection import BlockingChannel, BlockingConnection
+import aio_pika
 
 # Define constants for queues
 JOB_QUEUE_NAME = "transcoding_jobs"
-PROGRESS_QUEUE_NAME = "transcoding_progress.*"
-RESULTS_QUEUE_NAME = "transcoding_results.*"
+PROGRESS_QUEUE_NAME = "transcoding_progress"
+RESULTS_QUEUE_NAME = "transcoding_results"
 
 
-def connect_rabbitmq(
-    host: str,
-    port: int,
-    credentials: pika.PlainCredentials,
-    retry_interval: int = 5,
-    max_retries: int = 12,
-) -> BlockingConnection:
-    """
-    Connect to RabbitMQ with the provided host, port, and credentials.
-
-    :param host: The RabbitMQ host address.
-    :param port: The RabbitMQ port.
-    :param credentials: The authentication credentials for the RabbitMQ server.
-    :param retry_interval: The interval (in seconds) between retries when the connection fails.
-    :param max_retries: The maximum number of retries before giving up on connecting.
-    :return: A blocking connection to the RabbitMQ server.
-    """
-    retries = 0
-    while retries < max_retries:
-        try:
-            connection_parameters = pika.ConnectionParameters(
-                host, port, "/", credentials
-            )
-            return BlockingConnection(connection_parameters)
-        except pika.exceptions.AMQPConnectionError:
-            logging.info(
-                f"Connection to RabbitMQ failed. Retrying in {retry_interval} seconds..."
-            )
-            retries += 1
-            time.sleep(retry_interval)
-
-    raise Exception("Could not connect to RabbitMQ after multiple retries.")
-
-
-def init_channels(
-    rabbitmq_host: str,
-    rabbitmq_port: int,
-    credentials: pika.PlainCredentials,
-) -> Tuple[BlockingChannel, BlockingConnection]:
+async def init_channels(
+    rmq_host: str,
+    rmq_port: int,
+    rmq_user: str,
+    rmq_password: str,
+) -> Tuple[aio_pika.RobustChannel, aio_pika.RobustConnection]:
     """
     Initialize the channels for the worker.
 
     :param connection: A blocking connection to the RabbitMQ server.
     :return: The channels for the worker.
     """
-    connection = connect_rabbitmq(rabbitmq_host, rabbitmq_port, credentials)
+    connection_attempts = 0
+    retry_interval = 5
+    while True:
+        try:
+            connection = await aio_pika.connect_robust(
+                host=rmq_host,
+                port=rmq_port,
+                login=rmq_user,
+                password=rmq_password,
+            )
+            break
+        except aio_pika.exceptions.AMQPConnectionError:
+            logging.info(
+                f"Connection to RabbitMQ failed. Retrying in {retry_interval} seconds..."
+            )
+            connection_attempts += 1
+            await asyncio.sleep(retry_interval)
+            if connection_attempts >= 12:
+                raise Exception("Could not connect to RabbitMQ after multiple retries.")
 
-    channel = connection.channel()
+    logging.info("Connected to RabbitMQ")
+
+    channel = await connection.channel()
 
     # Initialize a standard queue for jobs
-    channel.queue_declare(queue=JOB_QUEUE_NAME)
+    await channel.declare_queue(JOB_QUEUE_NAME)
 
     # Initialize a topic exchange for progress logs
-    channel.exchange_declare(exchange="progress_logs", exchange_type="topic")
+    await channel.declare_exchange("progress_logs", aio_pika.ExchangeType.TOPIC)
     # Initialize a queue for progress logs
-    channel.queue_declare(queue=PROGRESS_QUEUE_NAME)
-    channel.queue_bind(
-        exchange="progress_logs",
-        queue=PROGRESS_QUEUE_NAME,
-        routing_key=PROGRESS_QUEUE_NAME,
-    )
+    progress_queue = await channel.declare_queue(PROGRESS_QUEUE_NAME)
+    await progress_queue.bind("progress_logs", routing_key=f"{PROGRESS_QUEUE_NAME}.*")
 
     # Initialize a topic exchange for results
-    channel.exchange_declare(exchange="results_logs", exchange_type="topic")
+    await channel.declare_exchange("results_logs", aio_pika.ExchangeType.TOPIC)
     # Initialize a queue for results
-    channel.queue_declare(queue=RESULTS_QUEUE_NAME)
-    channel.queue_bind(
-        exchange="results_logs",
-        queue=RESULTS_QUEUE_NAME,
-        routing_key=RESULTS_QUEUE_NAME,
-    )
+    results_queue = await channel.declare_queue(RESULTS_QUEUE_NAME)
+    await results_queue.bind("results_logs", routing_key=f"{RESULTS_QUEUE_NAME}.*")
 
     return (channel, connection)
 
 
 async def consume_events(
-    channel: BlockingChannel,
+    channel: aio_pika.Channel,
     result_callback: Callable,
     progress_callback: Callable,
 ):
-    loop = asyncio.get_event_loop()
-    while True:
-        method, properties, body = await loop.run_in_executor(
-            None, channel.basic_get, PROGRESS_QUEUE_NAME, True
-        )
-        if method is not None:
-            await progress_callback(channel, method, properties, body)
+    try:
+        progress_queue = await channel.get_queue(PROGRESS_QUEUE_NAME)
+        await progress_queue.consume(progress_callback)
 
-        method, properties, body = await loop.run_in_executor(
-            None, channel.basic_get, RESULTS_QUEUE_NAME, True
-        )
-        if method is not None:
-            await result_callback(channel, method, properties, body)
+        results_queue = await channel.get_queue(RESULTS_QUEUE_NAME)
+        await results_queue.consume(result_callback)
+    except Exception as e:
+        logging.error(f"Error while consuming events: {e}")
 
-        await asyncio.sleep(1)
+    try:
+        # Wait until terminate
+        await asyncio.Future()
+    finally:
+        await channel.close()

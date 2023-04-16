@@ -25,6 +25,12 @@ class Preset(Model):
 
 
 class Job(Model):
+    STATE_QUEUED = "queued"
+    STATE_IN_PROGRESS = "in-progress"
+    STATE_COMPLETED = "completed"
+    STATE_FAILED = "failed"
+    STATE_CANCELLED = "cancelled"
+
     id = fields.UUIDField(pk=True)
     job_id = fields.CharField(max_length=50, unique=True)
     input_s3_path = fields.CharField(max_length=255)
@@ -33,7 +39,7 @@ class Job(Model):
     preset: fields.ForeignKeyNullableRelation[Preset] = fields.ForeignKeyField(
         "models.Preset", null=True
     )
-    state = fields.CharField(max_length=20, default="queued")
+    state = fields.CharField(max_length=20, default=STATE_QUEUED)
     error = fields.TextField(null=True)
     error_type = fields.CharField(max_length=50, null=True)
     created_at = fields.DatetimeField(auto_now_add=True)
