@@ -350,6 +350,13 @@ async def process_workqueue_message(
         ch.basic_ack(delivery_tag=method.delivery_tag)
         return
 
+    if job.state == Job.STATE_STALLED:
+        logger.info(
+            f"Job {job_data.job_id} stalled the last time it was attempted, skipping processing."
+        )
+        ch.basic_ack(delivery_tag=method.delivery_tag)
+        return
+
     elif job.state == Job.STATE_QUEUED:
         # Update job state to in progress
         job.state = Job.STATE_IN_PROGRESS
