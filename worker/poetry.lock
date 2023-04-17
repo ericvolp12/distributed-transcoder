@@ -98,7 +98,7 @@ python-versions = "!=3.0.*,!=3.1.*,!=3.2.*,!=3.3.*,!=3.4.*,!=3.5.*,!=3.6.*,>=2.7
 
 [[package]]
 name = "distributed-transcoder-common"
-version = "0.2.5"
+version = "0.2.8"
 description = "A common library for for the distributed transcoder project"
 category = "main"
 optional = false
@@ -309,7 +309,7 @@ socks = ["PySocks (>=1.5.6,!=1.5.7,<2.0)"]
 [metadata]
 lock-version = "1.1"
 python-versions = "^3.9"
-content-hash = "e18b69009db7b060f055d23b9068aacde508b79ff7eb0eeeb279e84e8ea3292e"
+content-hash = "ace0bc1d114b651dfa077da7227b1d4439335f380210292e1e1e04f51fb25a88"
 
 [metadata.files]
 aiosqlite = [
@@ -398,8 +398,8 @@ colorama = [
     {file = "colorama-0.4.6.tar.gz", hash = "sha256:08695f5cb7ed6e0531a20572697297273c47b8cae5a63ffc6d6ed5c201be6e44"},
 ]
 distributed-transcoder-common = [
-    {file = "distributed-transcoder-common-0.2.5.tar.gz", hash = "sha256:631899832f76ef6556a92e38e8c5c08c6d54814d9cf2f4d0cc9c585716766923"},
-    {file = "distributed_transcoder_common-0.2.5-py3-none-any.whl", hash = "sha256:59830b57216ec8d056206b78352d88b69870913d21d0f607895f00d33cb468be"},
+    {file = "distributed-transcoder-common-0.2.8.tar.gz", hash = "sha256:3219b27b2301b08ea8564ba2e3bea366bbf9c014a6239d11d8cb06f15f9a38ad"},
+    {file = "distributed_transcoder_common-0.2.8-py3-none-any.whl", hash = "sha256:9a5df2ec5a0c9978fddb0991e7095c8664d3fc07491ef987b910cb7f34714b91"},
 ]
 iso8601 = [
     {file = "iso8601-1.1.0-py3-none-any.whl", hash = "sha256:8400e90141bf792bce2634df533dc57e3bee19ea120a87bebcd3da89a58ad73f"},

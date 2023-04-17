@@ -139,7 +139,7 @@ python-versions = "!=3.0.*,!=3.1.*,!=3.2.*,!=3.3.*,!=3.4.*,!=3.5.*,!=3.6.*,>=2.7
 
 [[package]]
 name = "distributed-transcoder-common"
-version = "0.2.5"
+version = "0.2.8"
 description = "A common library for for the distributed transcoder project"
 category = "main"
 optional = false
@@ -393,7 +393,7 @@ asyncmy = ["asyncmy (>=0.2.5,<0.3.0)"]
 asyncodbc = ["asyncodbc (>=0.1.1,<0.2.0)"]
 asyncpg = ["asyncpg"]
 accel = ["ciso8601", "orjson", "uvloop"]
-psycopg = ["psycopg[binary,pool] (==3.0.12)"]
+psycopg = ["psycopg[pool,binary] (==3.0.12)"]
 
 [[package]]
 name = "typing-extensions"
@@ -446,7 +446,7 @@ multidict = ">=4.0"
 [metadata]
 lock-version = "1.1"
 python-versions = "^3.9"
-content-hash = "5b2dba37afbb082561c1a8d9a00021fb780b3f97b07312ab8a361e4b722d7fc9"
+content-hash = "b96b28962c03d9843c144cf50735808e7999fa1c9a81ba4726f571f4d232f3a4"
 
 [metadata.files]
 aio-pika = [
@@ -547,8 +547,8 @@ colorama = [
     {file = "colorama-0.4.6.tar.gz", hash = "sha256:08695f5cb7ed6e0531a20572697297273c47b8cae5a63ffc6d6ed5c201be6e44"},
 ]
 distributed-transcoder-common = [
-    {file = "distributed-transcoder-common-0.2.5.tar.gz", hash = "sha256:631899832f76ef6556a92e38e8c5c08c6d54814d9cf2f4d0cc9c585716766923"},
-    {file = "distributed_transcoder_common-0.2.5-py3-none-any.whl", hash = "sha256:59830b57216ec8d056206b78352d88b69870913d21d0f607895f00d33cb468be"},
+    {file = "distributed-transcoder-common-0.2.8.tar.gz", hash = "sha256:3219b27b2301b08ea8564ba2e3bea366bbf9c014a6239d11d8cb06f15f9a38ad"},
+    {file = "distributed_transcoder_common-0.2.8-py3-none-any.whl", hash = "sha256:9a5df2ec5a0c9978fddb0991e7095c8664d3fc07491ef987b910cb7f34714b91"},
 ]
 fastapi = [
     {file = "fastapi-0.95.1-py3-none-any.whl", hash = "sha256:a870d443e5405982e1667dfe372663abf10754f246866056336d7f01c21dab07"},

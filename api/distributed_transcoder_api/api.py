@@ -7,16 +7,12 @@ import random
 import string
 import tempfile
 from dataclasses import asdict
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union
 
 import aio_pika
 import boto3
 from botocore.exceptions import ClientError
-from distributed_transcoder_common import (
-    JobProgressMessage,
-    JobResultMessage,
-    JobSubmissionMessage,
-)
+from distributed_transcoder_common import JobResultMessage, JobSubmissionMessage
 from distributed_transcoder_common.models import Job, JobOut, Preset, PresetOut
 from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
@@ -28,7 +24,7 @@ from tortoise.exceptions import DoesNotExist, IntegrityError
 from .managers import EventManager
 from .schemas import JobUpdate, PresetCreate, PresetUpdate, TranscodingJob
 from .seed import seed_presets
-from .work_queue import JOB_QUEUE_NAME, consume_events, init_channels
+from .work_queue import JOB_QUEUE_NAME, WorkQueue, init_channels
 
 # Constants
 # S3 Config
@@ -71,7 +67,7 @@ global channel
 
 
 @contextlib.asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> Dict[str, Union[WorkQueue, EventManager]]:
     logger.info("Lifecycle starting up...")
     logger.info("Initializing Tortoise ORM...")
     await Tortoise.init(
@@ -90,17 +86,17 @@ async def lifespan(app: FastAPI):
     )
 
     logger.info("Starting RabbitMQ event consumer...")
+    event_manager = EventManager()
+    event_consumer = WorkQueue(channel, event_manager, logger)
     # Start the event consumer and prevent it from being GC'd
-    event_consumption = loop.create_task(
-        consume_events(channel, result_callback, progress_callback)
-    )
+    event_consumption = loop.create_task(event_consumer.consume_events())
 
     logger.info("Seeding presets...")
     await seed_presets()
     logger.info("Finished seeding presets")
 
     # Yield control back to the application
-    yield
+    yield {"event_manager": event_manager, "event_consumer": event_consumer}
 
     # Run on FastAPI shutdown
     logger.info("Closing RabbitMQ connection...")
@@ -146,52 +142,6 @@ s3 = boto3.client(
     aws_secret_access_key=S3_SECRET_ACCESS_KEY,
     endpoint_url=S3_ENDPOINT_URL,
 )
-
-
-last_progress_messages: Dict[str, JobProgressMessage] = {}
-
-event_manager = EventManager()
-
-
-async def progress_callback(message: aio_pika.abc.AbstractIncomingMessage):
-    """
-    Callback for when a progress message is received from the work queue.
-
-    :param ch: The channel the message was received on.
-    :param method: The method used to deliver the message.
-    :param properties: The message properties.
-    :param body: The message body.
-
-    :return: None
-    """
-    msg = JobProgressMessage(**json.loads(message.body.decode()))
-    # Store the progress message in a dictionary so we can serve it to newly connected clients
-    last_progress_messages[msg.job_id] = msg
-    # Update the job state to 'in-progress'
-    await Job.filter(job_id=msg.job_id).update(state=Job.STATE_IN_PROGRESS)
-    await event_manager.send_message(msg.job_id, "progress", asdict(msg))
-
-
-async def result_callback(message: aio_pika.abc.AbstractIncomingMessage):
-    """
-    Callback for when a result message is received from the work queue.
-
-    :param ch: The channel the message was received on.
-    :param method: The method used to deliver the message.
-    :param properties: The message properties.
-    :param body: The message body.
-
-    :return: None
-    """
-    result = JobResultMessage(**json.loads(message.body.decode()))
-    # Remove the job from the in-progress tracker
-    last_progress_messages.pop(result.job_id, None)
-    # Update the job state to 'completed' or 'failed'
-    await Job.filter(job_id=result.job_id).update(
-        state=result.status, error=result.error, error_type=result.error_type
-    )
-    if result.status == Job.STATE_COMPLETED or result.status == Job.STATE_FAILED:
-        await event_manager.send_message(result.job_id, "completion", asdict(result))
 
 
 @app.post("/upload")
@@ -348,7 +298,7 @@ async def progress(websocket: WebSocket, job_id: str):
         None
     """
     await websocket.accept()
-    logging.info(
+    logger.info(
         f"Client {websocket.client.host}:{websocket.client.port} is now watching job: {job_id}"
     )
 
@@ -359,6 +309,8 @@ async def progress(websocket: WebSocket, job_id: str):
     # If the job is already done, send the completion message and close the connection
     if job.state != Job.STATE_IN_PROGRESS and job.state != Job.STATE_QUEUED:
         result_message = JobResultMessage(
+            timestamp=None,
+            worker_id=None,
             job_id=job.job_id,
             output_s3_path=job.output_s3_path,
             status=job.state,
@@ -370,19 +322,20 @@ async def progress(websocket: WebSocket, job_id: str):
         return
 
     # If we have a progress message for the job, send it to the client
-    if job_id in last_progress_messages:
-        await websocket.send_json(asdict(last_progress_messages[job_id]))
+    if job_id in websocket.state.event_consumer.last_progress_messages:
+        message = websocket.state.event_consumer.last_progress_messages[job_id]
+        await websocket.send_json(asdict(message))
 
     # Add the client to the event manager so we can send it progress messages
-    event_manager.add_connection(job_id, websocket)
+    websocket.state.event_manager.add_connection(job_id, websocket)
 
     # Wait for the client to disconnect
     try:
         while True:
             data = await websocket.receive_text()
     except WebSocketDisconnect:
-        event_manager.disconnect(job_id, websocket)
-        logging.info(
+        websocket.state.event_manager.disconnect(job_id, websocket)
+        logger.info(
             f"Client {websocket.client.host}:{websocket.client.port} disconnected from watching job: {job_id}"
         )
 

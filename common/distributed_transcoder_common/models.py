@@ -30,6 +30,7 @@ class Job(Model):
     STATE_COMPLETED = "completed"
     STATE_FAILED = "failed"
     STATE_CANCELLED = "cancelled"
+    STATE_STALLED = "stalled"
 
     id = fields.UUIDField(pk=True)
     job_id = fields.CharField(max_length=50, unique=True)

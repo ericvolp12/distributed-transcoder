@@ -145,7 +145,20 @@ def on_gst_message(
             ch.basic_publish(
                 exchange="progress_logs",
                 routing_key=PROGRESS_QUEUE_NAME,
-                body=json.dumps(asdict(JobProgressMessage(job_id, round(percent, 4)))),
+                properties=BasicProperties(
+                    content_type="application/json",
+                    content_encoding="utf-8",
+                ),
+                body=json.dumps(
+                    asdict(
+                        JobProgressMessage(
+                            timestamp=time.time(),
+                            worker_id=worker_id,
+                            job_id=job_id,
+                            progress=round(percent, 4),
+                        )
+                    )
+                ),
             )
             last_progress_time = time.time()
     else:
@@ -245,18 +258,18 @@ def transcode(
     return output_file
 
 
-def handle_transcode_exception(
+async def handle_transcode_exception(
     ch: Channel,
     method: Basic.Deliver,
     e: TranscodeException,
     job_id: str,
 ):
-    send_transcode_result(
+    await send_transcode_result(
         ch, method, Job.STATE_FAILED, job_id, error=str(e), error_type=e.error_type
     )
 
 
-def send_transcode_result(
+async def send_transcode_result(
     ch: Channel,
     method: Basic.Deliver,
     status: str,
@@ -268,20 +281,33 @@ def send_transcode_result(
     ch.basic_publish(
         exchange="results_logs",
         routing_key=RESULTS_QUEUE_NAME,
+        properties=BasicProperties(
+            content_type="application/json",
+            content_encoding="utf-8",
+        ),
         body=json.dumps(
             asdict(
                 JobResultMessage(
-                    status,
-                    job_id,
-                    output_s3_path,
-                    error,
-                    error_type,
+                    job_id=job_id,
+                    status=status,
+                    timestamp=time.time(),
+                    worker_id=worker_id,
+                    output_s3_path=output_s3_path,
+                    error=error,
+                    error_type=error_type,
                 )
             )
         ),
     )
     if error:
         logger.error(f"Transcoding failed: {error_type}")
+    # Update job state in DB
+    job = await Job.get_or_none(job_id=job_id)
+    if job is not None:
+        job.state = status
+        job.error = str(error)
+        job.error_type = error_type
+        await job.save()
     ch.basic_ack(delivery_tag=method.delivery_tag)
 
 
@@ -324,7 +350,11 @@ async def process_workqueue_message(
         ch.basic_ack(delivery_tag=method.delivery_tag)
         return
 
-    elif job.state == "queued":
+    elif job.state == Job.STATE_QUEUED:
+        # Update job state to in progress
+        job.state = Job.STATE_IN_PROGRESS
+        await job.save()
+
         with tempfile.NamedTemporaryFile() as input_file, tempfile.NamedTemporaryFile() as output_file:
             # Download the input chunk
             dl_start = time.time()
@@ -335,21 +365,14 @@ async def process_workqueue_message(
                 )
             except ClientError as e:
                 logger.error(f"Unable to download input chunk: {e}")
-                ch.basic_publish(
-                    exchange="results_logs",
-                    routing_key=RESULTS_QUEUE_NAME,
-                    body=json.dumps(
-                        asdict(
-                            JobResultMessage(
-                                status=Job.STATE_FAILED,
-                                job_id=job_data.job_id,
-                                error=str(e),
-                                error_type="s3_download",
-                            )
-                        )
-                    ),
+                await send_transcode_result(
+                    ch,
+                    method,
+                    Job.STATE_FAILED,
+                    job_data.job_id,
+                    error=str(e),
+                    error_type="s3_download",
                 )
-                ch.basic_ack(delivery_tag=method.delivery_tag)
                 return
             logger.info(
                 f"Chunk finished downloading to: {input_file.name} in {time.time() - dl_start} seconds"
@@ -365,10 +388,10 @@ async def process_workqueue_message(
                     job_data.job_id,
                 )
             except TranscodeException as e:
-                handle_transcode_exception(ch, method, e, job_data.job_id)
+                await handle_transcode_exception(ch, method, e, job_data.job_id)
                 return
             except Exception as e:
-                handle_transcode_exception(
+                await handle_transcode_exception(
                     ch, method, TranscodeException("unknown", str(e)), job_data.job_id
                 )
                 return
@@ -382,7 +405,7 @@ async def process_workqueue_message(
                 )
             except ClientError as e:
                 logger.error(f"Unable to upload output chunk: {e}")
-                send_transcode_result(
+                await send_transcode_result(
                     ch,
                     method,
                     Job.STATE_FAILED,
@@ -397,7 +420,7 @@ async def process_workqueue_message(
         return
 
     # Send a completion message with the output chunk's blob ID
-    send_transcode_result(
+    await send_transcode_result(
         ch,
         method,
         Job.STATE_COMPLETED,

@@ -12,14 +12,18 @@ class JobSubmissionMessage:
 
 @dataclass
 class JobResultMessage:
-    status: str
     job_id: str
-    output_s3_path: str
-    error: Optional[str]
-    error_type: Optional[str]
+    status: str
+    timestamp: Optional[float] = None
+    worker_id: Optional[str] = None
+    output_s3_path: Optional[str] = None
+    error: Optional[str] = None
+    error_type: Optional[str] = None
 
 
 @dataclass
 class JobProgressMessage:
+    timestamp: float
+    worker_id: str
     job_id: str
     progress: float
