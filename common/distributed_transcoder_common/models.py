@@ -45,6 +45,8 @@ class Job(Model):
     error_type = fields.CharField(max_length=50, null=True)
     created_at = fields.DatetimeField(auto_now_add=True)
     updated_at = fields.DatetimeField(auto_now=True)
+    transcode_started_at = fields.DatetimeField(null=True)
+    transcode_completed_at = fields.DatetimeField(null=True)
 
     class Meta:
         ordering = ["-created_at"]

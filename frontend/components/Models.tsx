@@ -10,6 +10,8 @@ export interface Job {
   preset_name?: string;
   state: string;
   updated_at: Date;
+  transcode_started_at?: Date;
+  transcode_completed_at?: Date;
 }
 
 export interface Preset {

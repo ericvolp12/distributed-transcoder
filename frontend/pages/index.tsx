@@ -4,7 +4,7 @@ const IndexPage = () => {
   return (
     <div className="py-10">
       <main>
-        <div className="mx-auto max-w-7xl sm:px-6 lg:px-8">
+        <div className="mx-auto max-w-screen-2xl sm:px-6 lg:px-8">
           <JobList></JobList>
         </div>
       </main>

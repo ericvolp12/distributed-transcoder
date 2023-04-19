@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime
 import json
 import logging
 import os
@@ -307,6 +308,7 @@ async def send_transcode_result(
         job.state = status
         job.error = str(error)
         job.error_type = error_type
+        job.transcode_completed_at = datetime.now()
         await job.save()
     ch.basic_ack(delivery_tag=method.delivery_tag)
 
@@ -360,6 +362,7 @@ async def process_workqueue_message(
     elif job.state == Job.STATE_QUEUED:
         # Update job state to in progress
         job.state = Job.STATE_IN_PROGRESS
+        job.transcode_started_at = datetime.now()
         await job.save()
 
         with tempfile.NamedTemporaryFile() as input_file, tempfile.NamedTemporaryFile() as output_file:

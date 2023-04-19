@@ -7,6 +7,12 @@ import {
 import { useEffect, useState } from "react";
 import "react-tooltip/dist/react-tooltip.css";
 import { Tooltip } from "react-tooltip";
+import {
+  formatDistanceToNowStrict,
+  formatDistanceStrict,
+  intervalToDuration,
+  formatDuration,
+} from "date-fns";
 
 import { Job } from "../Models";
 import {
@@ -20,11 +26,20 @@ import CircularProgress from "../CircularProgress";
 import JobStatusProgress from "./StatusProgress";
 import { Pagination } from "../Pagination/Pagination";
 import NewJob from "../JobSubmission/NewJob";
+import { differenceInSeconds } from "date-fns";
 
 interface Alert {
   type: "error" | "success";
   message: string;
   autoDismiss?: boolean;
+}
+
+function formatDurationHMS(startDate: Date, endDate: Date) {
+  const duration = intervalToDuration({
+    start: new Date(startDate),
+    end: new Date(endDate),
+  });
+  return formatDuration(duration, { format: ["hours", "minutes", "seconds"] });
 }
 
 const JobList = () => {
@@ -94,8 +109,13 @@ const JobList = () => {
         ...job,
         created_at: new Date(job.created_at),
         updated_at: new Date(job.updated_at),
+        transcode_started_at: job.transcode_started_at
+          ? new Date(job.transcode_started_at)
+          : null,
+        transcode_completed_at: job.transcode_completed_at
+          ? new Date(job.transcode_completed_at)
+          : null,
       }));
-
       setJobs(temp_jobs);
     } catch (error) {
       console.error("Error fetching jobs:", error);
@@ -385,7 +405,7 @@ const JobList = () => {
                       scope="col"
                       className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900"
                     >
-                      Updated At
+                      Transcoding Time
                     </th>
                     <th
                       scope="col"
@@ -474,7 +494,25 @@ const JobList = () => {
                         )}
                       </td>
                       <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
-                        {job.updated_at.toLocaleString()}
+                        {job.state === "in-progress" ? (
+                          // Time since job started with exact time
+                          <span className="text-gray-400">
+                            {formatDurationHMS(
+                              new Date(),
+                              job.transcode_started_at
+                            )}
+                          </span>
+                        ) : job.state === "completed" ? (
+                          // Time from job start to completion with exact time
+                          <span className="text-gray-400">
+                            {formatDurationHMS(
+                              job.transcode_started_at,
+                              job.transcode_completed_at
+                            )}
+                          </span>
+                        ) : (
+                          <span className="text-gray-400 ml-5">N/A</span>
+                        )}
                       </td>
                       <td className="whitespace-nowrap px-3 py-2 text-sm text-gray-500">
                         {(job.state === "queued" && (
