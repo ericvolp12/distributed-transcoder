@@ -52,6 +52,23 @@ class Job(Model):
         ordering = ["-created_at"]
 
 
+class Playlist(Model):
+    id = fields.UUIDField(pk=True)
+    name = fields.CharField(max_length=250, unique=True)
+    jobs: fields.ManyToManyRelation[Job] = fields.ManyToManyField(
+        "models.Job", related_name="playlists"
+    )
+    created_at = fields.DatetimeField(auto_now_add=True)
+    updated_at = fields.DatetimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    class PydanticMeta:
+        exclude = ("jobs",)
+
+
 Tortoise.init_models(["distributed_transcoder_common.models"], "models")
 PresetOut = pydantic_model_creator(Preset, name="PresetOut")
 JobOut = pydantic_model_creator(Job, name="JobOut")
+PlaylistOut = pydantic_model_creator(Playlist, name="PlaylistOut")

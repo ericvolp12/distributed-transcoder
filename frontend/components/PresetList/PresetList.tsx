@@ -266,6 +266,7 @@ const PresetList = () => {
       <Pagination
         currentPage={currentPage}
         pageSize={pageSize}
+        itemsOnThisPage={presets.length}
         handlePageChange={setCurrentPage}
         handlePageSizeChange={handlePageSizeChange}
         loading={presetsLoading}

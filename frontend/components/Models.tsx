@@ -12,6 +12,14 @@ export interface Job {
   updated_at: Date;
   transcode_started_at?: Date;
   transcode_completed_at?: Date;
+  playlists?: Playlist[];
+}
+
+export interface Playlist {
+  created_at: Date;
+  updated_at: Date;
+  id: string;
+  name: string;
 }
 
 export interface Preset {

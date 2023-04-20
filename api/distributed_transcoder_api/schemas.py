@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, List
 
 from pydantic import BaseModel
 
@@ -43,3 +43,15 @@ class JobUpdate(BaseModel):
     state: Optional[str] = None
     error: Optional[str] = None
     error_type: Optional[str] = None
+
+
+class PlaylistCreate(BaseModel):
+    name: str
+    input_s3_path: str
+    presets: List[str]
+
+
+class PlaylistOut(BaseModel):
+    playlist_id: str
+    input_s3_path: str
+    jobs: List[str]

@@ -14,6 +14,7 @@ const Spinner = () => {
 interface PaginationProps {
   currentPage: number;
   pageSize: number;
+  itemsOnThisPage: number;
   handlePageChange: (page: number) => void;
   handlePageSizeChange: (e: React.ChangeEvent<HTMLSelectElement>) => void;
   loading: boolean;
@@ -22,6 +23,7 @@ interface PaginationProps {
 export const Pagination: React.FC<PaginationProps> = ({
   currentPage,
   pageSize,
+  itemsOnThisPage,
   handlePageChange,
   handlePageSizeChange,
   loading,
@@ -60,13 +62,18 @@ export const Pagination: React.FC<PaginationProps> = ({
         <button
           onClick={() => handlePageChange(currentPage - 1)}
           disabled={currentPage === 1}
-          className="relative inline-flex items-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 focus-visible:outline-offset-0"
+          className={`relative mr-3 inline-flex items-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 focus-visible:outline-offset-0 ${
+            currentPage === 1 ? "opacity-50 cursor-not-allowed" : ""
+          }`}
         >
           Previous
         </button>
         <button
           onClick={() => handlePageChange(currentPage + 1)}
-          className="relative ml-3 inline-flex items-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 focus-visible:outline-offset-0"
+          disabled={itemsOnThisPage < pageSize}
+          className={`relative ml-3 inline-flex items-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 focus-visible:outline-offset-0 ${
+            itemsOnThisPage < pageSize ? "opacity-50 cursor-not-allowed" : ""
+          }`}
         >
           Next
         </button>

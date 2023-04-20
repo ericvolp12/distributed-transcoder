@@ -13,7 +13,13 @@ import aio_pika
 import boto3
 from botocore.exceptions import ClientError
 from distributed_transcoder_common import JobResultMessage, JobSubmissionMessage
-from distributed_transcoder_common.models import Job, JobOut, Preset, PresetOut
+from distributed_transcoder_common.models import (
+    Job,
+    JobOut,
+    Preset,
+    PresetOut,
+    Playlist,
+)
 from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -22,7 +28,14 @@ from tortoise import Tortoise, connections
 from tortoise.exceptions import DoesNotExist, IntegrityError
 
 from .managers import EventManager
-from .schemas import JobUpdate, PresetCreate, PresetUpdate, TranscodingJob
+from .schemas import (
+    JobUpdate,
+    PresetCreate,
+    PlaylistOut,
+    PresetUpdate,
+    TranscodingJob,
+    PlaylistCreate,
+)
 from .seed import seed_presets
 from .work_queue import JOB_QUEUE_NAME, WorkQueue, init_channels
 
@@ -199,7 +212,12 @@ async def submit_job(job: TranscodingJob):
 
 @app.get("/jobs", response_model=List[JobOut])
 async def list_jobs(skip: int = Query(0, ge=0), limit: int = Query(10, ge=1, le=100)):
-    jobs = await Job.all().offset(skip).limit(limit).prefetch_related("preset")
+    jobs = (
+        await Job.all()
+        .offset(skip)
+        .limit(limit)
+        .prefetch_related("preset", "playlists")
+    )
     if len(jobs) == 0:
         raise HTTPException(status_code=404, detail="No jobs found")
     return jobs
@@ -207,7 +225,7 @@ async def list_jobs(skip: int = Query(0, ge=0), limit: int = Query(10, ge=1, le=
 
 @app.get("/jobs/{job_id}", response_model=JobOut)
 async def get_job(job_id: str):
-    job = await Job.get_or_none(job_id=job_id).prefetch_related("preset")
+    job = await Job.get_or_none(job_id=job_id).prefetch_related("preset", "playlists")
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     return job
@@ -215,7 +233,9 @@ async def get_job(job_id: str):
 
 @app.put("/jobs/{job_id}", response_model=JobOut)
 async def update_job(job_id: str, job: JobUpdate):
-    existing_job = await Job.get_or_none(job_id=job_id).prefetch_related("preset")
+    existing_job = await Job.get_or_none(job_id=job_id).prefetch_related(
+        "preset", "playlists"
+    )
     if not existing_job:
         raise HTTPException(status_code=404, detail="Preset not found")
 
@@ -280,6 +300,64 @@ async def delete_preset(preset_id: str):
         raise HTTPException(status_code=404, detail="Preset not found")
     await preset.delete()
     return preset
+
+
+@app.post("/playlists", response_model=PlaylistOut)
+async def create_playlist(playlist: PlaylistCreate):
+    # Create the playlist
+    new_playlist = await Playlist.create(
+        name=playlist.name, input_s3_path=playlist.input_s3_path
+    )
+
+    # Create jobs for each preset
+    jobs = []
+    for idx, preset_id in enumerate(playlist.presets):
+        job_id = f"{playlist.name}-{idx}"
+
+        # Get the preset
+        preset = await Preset.get_or_none(preset_id=preset_id)
+        if not preset:
+            raise HTTPException(status_code=404, detail="Preset not found")
+
+        # Define the output S3 path
+        output_s3_path = f"{new_playlist.id}/{preset_id}/{job_id}.mp4"
+
+        # Create the job
+        job = await Job.create(
+            job_id=job_id,
+            input_s3_path=playlist.input_s3_path,
+            output_s3_path=output_s3_path,
+            pipeline=preset.pipeline,
+            preset_id=preset_id,
+        )
+
+        # Add the job to the playlist
+        await new_playlist.jobs.add(job)
+
+        job_submission_message = JobSubmissionMessage(
+            job_id=job.job_id,
+            input_s3_path=job.input_s3_path,
+            output_s3_path=job.output_s3_path,
+            transcode_options=job.pipeline,
+        )
+
+        await channel.default_exchange.publish(
+            aio_pika.Message(
+                json.dumps(asdict(job_submission_message)).encode(),
+                content_type="application/json",
+            ),
+            routing_key=JOB_QUEUE_NAME,
+        )
+
+        jobs.append(job_id)
+
+    await new_playlist.save()
+
+    return PlaylistOut(
+        playlist_id=str(new_playlist.id),
+        input_s3_path=playlist.input_s3_path,
+        jobs=jobs,
+    )
 
 
 @app.websocket("/progress/{job_id}")
@@ -354,7 +432,7 @@ async def download_file(filename: str):
     return StreamingResponse(file_stream(), media_type="application/octet-stream")
 
 
-@app.get("/signed_download/{filename}")
+@app.get("/signed_download/{filename:path}")
 async def generate_presigned_url(filename: str):
     try:
         # Generate a pre-signed URL for the given file

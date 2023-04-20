@@ -34,6 +34,15 @@ interface Alert {
   autoDismiss?: boolean;
 }
 
+interface PlaylistGroup {
+  name: string;
+  jobs: Job[];
+}
+
+interface GroupedJobs {
+  [playlistId: string]: PlaylistGroup;
+}
+
 function formatDurationHMS(startDate: Date, endDate: Date) {
   const duration = intervalToDuration({
     start: new Date(startDate),
@@ -105,7 +114,7 @@ const JobList = () => {
       }
 
       const data = await response.json();
-      let temp_jobs = data.map((job) => ({
+      let temp_jobs: Job[] = data.map((job) => ({
         ...job,
         created_at: new Date(job.created_at),
         updated_at: new Date(job.updated_at),
@@ -116,6 +125,32 @@ const JobList = () => {
           ? new Date(job.transcode_completed_at)
           : null,
       }));
+
+      // Sort temp jobs to make sure if they're in a playlist, they're next to each other
+      temp_jobs.sort((a, b) => {
+        const aPlaylistId =
+          a.playlists && a.playlists.length > 0 ? a.playlists[0].id : null;
+        const bPlaylistId =
+          b.playlists && b.playlists.length > 0 ? b.playlists[0].id : null;
+
+        if (aPlaylistId === bPlaylistId) {
+          return a.job_id.localeCompare(b.job_id);
+        }
+
+        if (aPlaylistId === null) {
+          return 1;
+        }
+
+        if (bPlaylistId === null) {
+          return -1;
+        }
+
+        const aPlaylistUpdtaedAt = a.playlists[0].updated_at;
+        const bPlaylistUpdatedAt = b.playlists[0].updated_at;
+
+        return aPlaylistUpdtaedAt < bPlaylistUpdatedAt ? 1 : -1;
+      });
+
       setJobs(temp_jobs);
     } catch (error) {
       console.error("Error fetching jobs:", error);
@@ -416,121 +451,195 @@ const JobList = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200 bg-white">
-                  {jobs.map((job) => (
-                    <tr key={job.job_id}>
-                      <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm font-medium text-gray-900 sm:pl-6">
-                        {job.job_id}
-                      </td>
-                      <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
-                        {job.state === "in-progress" ? (
-                          <JobStatusProgress
-                            progress={jobProgress[job.job_id] || 0}
-                          />
-                        ) : job.error ? (
-                          <>
-                            <div
-                              data-tooltip-id={`error-tooltip-${job.job_id}`}
-                              data-tooltip-content={`(${job.error_type}): ${job.error}`}
-                              data-tooltip-place="left"
-                            >
-                              {job.state}
-                            </div>
-                            <Tooltip
-                              id={`error-tooltip-${job.job_id}`}
-                              className="absolute z-10 invisible inline-block px-3 py-2 text-sm font-medium text-white bg-gray-900 rounded-lg shadow-sm opacity-0 tooltip dark:bg-gray-700 whitespace-break-spaces max-w-xs"
-                            />
-                          </>
-                        ) : (
-                          job.state
-                        )}
-                      </td>
-                      <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
-                        {job.preset.name}
-                      </td>
-                      <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
-                        <button
-                          type="button"
-                          className="relative focus:outline-none"
-                          onClick={() =>
-                            handleDownload(
-                              job.input_s3_path,
-                              job.job_id + "_input"
-                            )
-                          }
-                        >
-                          {loadingJob === job.job_id + "_input" ? (
-                            <CircularProgress progress={progress} />
-                          ) : (
-                            <CloudArrowDownIcon className="inline-block w-4 h-4 ml-1" />
-                          )}
-                        </button>
-                        {" " + job.input_s3_path}
-                      </td>
-                      <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
-                        {job.state === "completed" ? (
-                          <>
-                            <button
-                              type="button"
-                              className="relative focus:outline-none"
-                              onClick={() =>
-                                handleDownload(
-                                  job.output_s3_path,
-                                  job.job_id + "_output"
-                                )
-                              }
-                            >
-                              {loadingJob === job.job_id + "_output" ? (
-                                <CircularProgress progress={progress} />
-                              ) : (
-                                <CloudArrowDownIcon className="inline-block w-4 h-4 ml-1" />
-                              )}
-                            </button>
-                            {" " + job.output_s3_path}
-                          </>
-                        ) : (
-                          <span className="text-gray-400 ml-5">
-                            Job Incomplete
-                          </span>
-                        )}
-                      </td>
-                      <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
-                        {job.state === "in-progress" ? (
-                          // Time since job started with exact time
-                          <span className="text-gray-400">
-                            {formatDurationHMS(
-                              new Date(),
-                              job.transcode_started_at
-                            )}
-                          </span>
-                        ) : job.state === "completed" ? (
-                          // Time from job start to completion with exact time
-                          <span className="text-gray-400">
-                            {formatDurationHMS(
-                              job.transcode_started_at,
-                              job.transcode_completed_at
-                            )}
-                          </span>
-                        ) : (
-                          <span className="text-gray-400 ml-5">N/A</span>
-                        )}
-                      </td>
-                      <td className="whitespace-nowrap px-3 py-2 text-sm text-gray-500">
-                        {(job.state === "queued" && (
-                          <button
-                            type="button"
-                            className="inline-flex rounded-md bg-red-50 p-1.5 text-red-500 hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-red-600 focus:ring-offset-2 focus:ring-offset-green-50 ml-4"
-                            onClick={() => handleCancel(job.job_id)}
+                  {(() => {
+                    const groupedJobs = jobs.reduce<GroupedJobs>((acc, job) => {
+                      const playlistId =
+                        job.playlists && job.playlists.length > 0
+                          ? job.playlists[0].id
+                          : "independent";
+                      const playlistName =
+                        job.playlists && job.playlists.length > 0
+                          ? job.playlists[0].name
+                          : "Independent Jobs";
+
+                      if (!acc[playlistId]) {
+                        acc[playlistId] = {
+                          name: playlistName,
+                          jobs: [],
+                        };
+                      }
+
+                      acc[playlistId].jobs.push(job);
+                      return acc;
+                    }, {});
+
+                    return Object.values(groupedJobs).map((playlistGroup) => (
+                      <>
+                        <tr className="border-t border-gray-200">
+                          <th
+                            colSpan={7}
+                            scope="colgroup"
+                            className="bg-gray-50 py-2 pl-4 pr-3 text-left text-sm font-semibold text-gray-900 sm:pl-3"
                           >
-                            {loadingJob === job.job_id ? (
-                              <CircularProgress progress={progress} />
-                            ) : (
-                              <XMarkIcon className="h-4 w-4" />
-                            )}
-                          </button>
-                        )) || <span className="text-gray-400 ml-5">N/A</span>}
-                      </td>
-                    </tr>
-                  ))}
+                            {playlistGroup.name}
+                          </th>
+                        </tr>
+                        {playlistGroup.jobs.map((job) => (
+                          <tr key={job.job_id}>
+                            <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm font-medium text-gray-900 sm:pl-6">
+                              {job.job_id}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
+                              {job.state === "in-progress" ? (
+                                <JobStatusProgress
+                                  progress={jobProgress[job.job_id] || 0}
+                                />
+                              ) : job.error && job.state !== "completed" ? (
+                                <>
+                                  <div
+                                    data-tooltip-id={`error-tooltip-${job.job_id}`}
+                                    data-tooltip-content={`(${job.error_type}): ${job.error}`}
+                                    data-tooltip-place="left"
+                                  >
+                                    {job.state}
+                                  </div>
+                                  <Tooltip
+                                    id={`error-tooltip-${job.job_id}`}
+                                    className="absolute z-10 invisible inline-block px-3 py-2 text-sm font-medium text-white bg-gray-900 rounded-lg shadow-sm opacity-0 tooltip dark:bg-gray-700 whitespace-break-spaces max-w-xs"
+                                  />
+                                </>
+                              ) : (
+                                job.state
+                              )}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
+                              {job.preset.name}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
+                              <button
+                                type="button"
+                                className="relative focus:outline-none"
+                                onClick={() =>
+                                  handleDownload(
+                                    job.input_s3_path,
+                                    job.job_id + "_input"
+                                  )
+                                }
+                              >
+                                {loadingJob === job.job_id + "_input" ? (
+                                  <CircularProgress progress={progress} />
+                                ) : (
+                                  <CloudArrowDownIcon className="inline-block w-4 h-4 ml-1" />
+                                )}
+                              </button>
+                              {job.input_s3_path.length > 20 ? (
+                                <span
+                                  data-tooltip-id={`input-tooltip-${job.job_id}`}
+                                  data-tooltip-content={job.input_s3_path}
+                                  data-tooltip-place="left"
+                                >
+                                  {" ..." +
+                                    job.input_s3_path.substring(
+                                      job.input_s3_path.length - 20,
+                                      job.input_s3_path.length
+                                    )}
+                                </span>
+                              ) : (
+                                " " + job.input_s3_path
+                              )}
+                              <Tooltip
+                                id={`input-tooltip-${job.job_id}`}
+                                className="absolute z-10 invisible inline-block px-3 py-2 text-sm font-medium text-white bg-gray-900 rounded-lg shadow-sm opacity-0 tooltip dark:bg-gray-700 whitespace-break-spaces max-w-xs"
+                              />
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
+                              {job.state === "completed" ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    className="relative focus:outline-none"
+                                    onClick={() =>
+                                      handleDownload(
+                                        job.output_s3_path,
+                                        job.job_id + "_output"
+                                      )
+                                    }
+                                  >
+                                    {loadingJob === job.job_id + "_output" ? (
+                                      <CircularProgress progress={progress} />
+                                    ) : (
+                                      <CloudArrowDownIcon className="inline-block w-4 h-4 ml-1" />
+                                    )}
+                                  </button>
+                                  {job.output_s3_path.length > 20 ? (
+                                    <span
+                                      data-tooltip-id={`output-tooltip-${job.job_id}`}
+                                      data-tooltip-content={job.output_s3_path}
+                                      data-tooltip-place="left"
+                                    >
+                                      {" ..." +
+                                        job.output_s3_path.substring(
+                                          job.output_s3_path.length - 20,
+                                          job.output_s3_path.length
+                                        )}
+                                    </span>
+                                  ) : (
+                                    " " + job.output_s3_path
+                                  )}
+                                  <Tooltip
+                                    id={`output-tooltip-${job.job_id}`}
+                                    className="absolute z-10 invisible inline-block px-3 py-2 text-sm font-medium text-white bg-gray-900 rounded-lg shadow-sm opacity-0 tooltip dark:bg-gray-700 whitespace-break-spaces max-w-xs"
+                                  />
+                                </>
+                              ) : (
+                                <span className="text-gray-400 ml-5">
+                                  Job Incomplete
+                                </span>
+                              )}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
+                              {job.state === "in-progress" ? (
+                                // Time since job started with exact time
+                                <span className="text-gray-400">
+                                  {formatDurationHMS(
+                                    new Date(),
+                                    job.transcode_started_at
+                                  )}
+                                </span>
+                              ) : job.state === "completed" ? (
+                                // Time from job start to completion with exact time
+                                <span className="text-gray-400">
+                                  {formatDurationHMS(
+                                    job.transcode_started_at,
+                                    job.transcode_completed_at
+                                  )}
+                                </span>
+                              ) : (
+                                <span className="text-gray-400 ml-5">N/A</span>
+                              )}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-2 text-sm text-gray-500">
+                              {(job.state === "queued" && (
+                                <button
+                                  type="button"
+                                  className="inline-flex rounded-md bg-red-50 p-1.5 text-red-500 hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-red-600 focus:ring-offset-2 focus:ring-offset-green-50 ml-4"
+                                  onClick={() => handleCancel(job.job_id)}
+                                >
+                                  {loadingJob === job.job_id ? (
+                                    <CircularProgress progress={progress} />
+                                  ) : (
+                                    <XMarkIcon className="h-4 w-4" />
+                                  )}
+                                </button>
+                              )) || (
+                                <span className="text-gray-400 ml-5">N/A</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </>
+                    ));
+                  })()}
                 </tbody>
               </table>
             </div>
@@ -539,6 +648,7 @@ const JobList = () => {
         <Pagination
           currentPage={currentPage}
           pageSize={pageSize}
+          itemsOnThisPage={jobs.length}
           handlePageChange={setCurrentPage}
           handlePageSizeChange={handlePageSizeChange}
           loading={jobsLoading}
