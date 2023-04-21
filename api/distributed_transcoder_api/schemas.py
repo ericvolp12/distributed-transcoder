@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Optional, List
 
 from pydantic import BaseModel
@@ -51,7 +52,15 @@ class PlaylistCreate(BaseModel):
     presets: List[str]
 
 
-class PlaylistOut(BaseModel):
+class PlaylistCreateOut(BaseModel):
     playlist_id: str
     input_s3_path: str
     jobs: List[str]
+
+
+class PlaylistShallowOut(BaseModel):
+    playlist_id: str
+    name: str
+    jobs: List[str]
+    created_at: datetime
+    updated_at: datetime

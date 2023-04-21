@@ -19,6 +19,7 @@ from distributed_transcoder_common.models import (
     Preset,
     PresetOut,
     Playlist,
+    PlaylistOut,
 )
 from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
@@ -30,8 +31,9 @@ from tortoise.exceptions import DoesNotExist, IntegrityError
 from .managers import EventManager
 from .schemas import (
     JobUpdate,
+    PlaylistShallowOut,
     PresetCreate,
-    PlaylistOut,
+    PlaylistCreateOut,
     PresetUpdate,
     TranscodingJob,
     PlaylistCreate,
@@ -302,7 +304,40 @@ async def delete_preset(preset_id: str):
     return preset
 
 
-@app.post("/playlists", response_model=PlaylistOut)
+# GET Playlists
+@app.get(
+    "/playlists", response_model=Union[List[PlaylistOut], List[PlaylistShallowOut]]
+)
+async def list_playlists(
+    skip: int = Query(0, ge=0),
+    deep: bool = Query(False, description="Include full jobs in response"),
+    limit: int = Query(10, ge=1, le=100),
+    name: Optional[str] = None,
+):
+    query = Playlist.all().prefetch_related("jobs", "jobs__preset")
+
+    if name:
+        query = query.filter(name=name)
+
+    playlists = await query.offset(skip).limit(limit)
+
+    if len(playlists) == 0:
+        raise HTTPException(status_code=404, detail="No playlists found")
+    if deep:
+        return playlists
+    return [
+        PlaylistShallowOut(
+            playlist_id=str(playlist.id),
+            name=playlist.name,
+            jobs=[str(job.id) for job in playlist.jobs],
+            created_at=playlist.created_at,
+            updated_at=playlist.updated_at,
+        )
+        for playlist in playlists
+    ]
+
+
+@app.post("/playlists", response_model=PlaylistCreateOut)
 async def create_playlist(playlist: PlaylistCreate):
     # Create the playlist
     new_playlist = await Playlist.create(
@@ -353,7 +388,7 @@ async def create_playlist(playlist: PlaylistCreate):
 
     await new_playlist.save()
 
-    return PlaylistOut(
+    return PlaylistCreateOut(
         playlist_id=str(new_playlist.id),
         input_s3_path=playlist.input_s3_path,
         jobs=jobs,

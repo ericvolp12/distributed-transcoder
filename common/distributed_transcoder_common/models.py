@@ -64,9 +64,6 @@ class Playlist(Model):
     class Meta:
         ordering = ["name"]
 
-    class PydanticMeta:
-        exclude = ("jobs",)
-
 
 Tortoise.init_models(["distributed_transcoder_common.models"], "models")
 PresetOut = pydantic_model_creator(Preset, name="PresetOut")

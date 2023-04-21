@@ -27,6 +27,7 @@ import JobStatusProgress from "./StatusProgress";
 import { Pagination } from "../Pagination/Pagination";
 import NewJob from "../JobSubmission/NewJob";
 import { differenceInSeconds } from "date-fns";
+import NewPlaylist from "../PlaylistSubmission/NewPlaylist";
 
 interface Alert {
   type: "error" | "success";
@@ -61,7 +62,9 @@ const JobList = () => {
   const [jobProgress, setJobProgress] = useState<{ [jobId: string]: number }>(
     {}
   );
-  const [isFormVisible, setIsFormVisible] = useState(false);
+  const [isJobSubmitFormVisible, setIsJobSubmitFormVisible] = useState(false);
+  const [isPlaylistSubmitFormVisible, setIsPlaylistSubmitFormVisible] =
+    useState(false);
   const [connectedSockets, setConnectedSockets] = useState<string[]>([]);
   const [pageSize, setPageSize] = useState(10);
   const [currentPage, setCurrentPage] = useState(1);
@@ -91,8 +94,12 @@ const JobList = () => {
   }, [jobs]);
 
   // Update this function to toggle the job submission form
-  const handleFormToggle = () => {
-    setIsFormVisible(!isFormVisible);
+  const handleJobSubmitFormToggle = () => {
+    setIsJobSubmitFormVisible(!isJobSubmitFormVisible);
+  };
+
+  const handlePlaylistSubmitFormToggle = () => {
+    setIsPlaylistSubmitFormVisible(!isPlaylistSubmitFormVisible);
   };
 
   const fetchJobsWithPagination = async (skip: number, limit: number) => {
@@ -330,10 +337,19 @@ const JobList = () => {
         <div className="mt-4 sm:ml-16 sm:mt-0 sm:flex-none">
           <button
             type="button"
-            onClick={handleFormToggle}
+            onClick={handleJobSubmitFormToggle}
             className="block rounded-md bg-indigo-600 px-3 py-2 text-center text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
           >
-            Submit Job
+            New Job
+          </button>
+        </div>
+        <div className="mt-4 sm:ml-4 sm:mt-0 sm:flex-none">
+          <button
+            type="button"
+            onClick={handlePlaylistSubmitFormToggle}
+            className="block rounded-md bg-cyan-600 px-3 py-2 text-center text-sm font-semibold text-white shadow-sm hover:bg-cyan-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-600"
+          >
+            New Playlist
           </button>
         </div>
       </div>
@@ -654,12 +670,21 @@ const JobList = () => {
           loading={jobsLoading}
         />
         <NewJob
-          open={isFormVisible}
+          open={isJobSubmitFormVisible}
           setOpen={(state: boolean) => {
             if (!state) {
               fetchJobs();
             }
-            setIsFormVisible(state);
+            setIsJobSubmitFormVisible(state);
+          }}
+        />
+        <NewPlaylist
+          open={isPlaylistSubmitFormVisible}
+          setOpen={(state: boolean) => {
+            if (!state) {
+              fetchJobs();
+            }
+            setIsPlaylistSubmitFormVisible(state);
           }}
         />
       </div>
